@@ -1,6 +1,0 @@
-0: [2020-Feb-11 16:48:31.000919] - CConfig::SetPath() - cannot open file, /mnt/teamway/atlas/BallCameraServer/qt-build/../config/global.ini
-1: [2020-Feb-11 16:48:31.001072] - YH Device SDK, compiled Jan  6 2020, 14:30:29, copyrights (c) 2018.
-2: [2020-Feb-11 16:48:31.001113] - LOG Begin(dev sdk): control::Init() - process: /mnt/teamway/atlas/BallCameraServer/qt-build/BallCameraServer(9314)
-3: [2020-Feb-11 16:48:31.001170] - [devsdk]control::Init() - CDevice::m_objTask.Start()!
-4: [2020-Feb-11 16:48:31.001455] - tcpServer::doAccept() - create conn obj-------
-5: [2020-Feb-11 16:48:31.001507] - [devsdk] control::Init() - listen 10.0.48.66 @ 6608...
