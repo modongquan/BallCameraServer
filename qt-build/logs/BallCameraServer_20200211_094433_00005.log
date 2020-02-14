@@ -1,0 +1,21 @@
+0: [2020-Feb-11 09:44:33.882706] - CConfig::SetPath() - cannot open file, /mnt/teamway/atlas/BallCameraServer/qt-build/../config/global.ini
+1: [2020-Feb-11 09:44:33.882849] - YH Device SDK, compiled Jan  6 2020, 14:30:29, copyrights (c) 2018.
+2: [2020-Feb-11 09:44:33.882881] - LOG Begin(dev sdk): control::Init() - process: /mnt/teamway/atlas/BallCameraServer/qt-build/BallCameraServer(29502)
+3: [2020-Feb-11 09:44:33.882947] - [devsdk]control::Init() - CDevice::m_objTask.Start()!
+4: [2020-Feb-11 09:44:33.883274] - tcpServer::doAccept() - create conn obj-------
+5: [2020-Feb-11 09:44:33.883321] - [devsdk] control::Init() - listen 10.0.48.66 @ 6608...
+6: [2020-Feb-11 09:44:35.741873] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x27af030
+7: [2020-Feb-11 09:44:35.742096] - tcpServer::doAccept() - create conn obj-------
+8: [2020-Feb-11 09:44:35.761059] - COMMON::connObj::SendData() - conn: 0x0x27af030, packet len: 60. strand post doWrite...
+9: [2020-Feb-11 09:44:35.761205] - [dsdk] DeviceManager::build_conn_device_map() - session x0x27af030 existed, device obj NULL, update session ------- 
+
+10: [2020-Feb-11 09:44:35.761296] - [devsdk]DeviceManger::DoProc() - do signal reg - {"eventtype":"26","deviceid":"30013","channels":"1","type":"4108","nettype":"2","disktype":"1","factorytype":"18","audiotype":"1","addr":"10.0.48.70:52747","desc":"register"}
+11: [2020-Feb-11 09:44:35.884006] - COMMON::connObj::SendData() - conn: 0x0x27af030, packet len: 99. strand post doWrite...
+12: [2020-Feb-11 09:44:35.884150] - CDevice::SendOpenStreamCmd() - hSession: 0x0x27af030, ret: 0x0. cmd len: 99, cmd str: $$dc0090,1,C508,30013,,200211 094435,6B8B4567-23C6-327B-A998-3C6473483366,1,0,0,0,10.0.48.66,6608,#
+13: [2020-Feb-11 09:44:35.972927] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7ffb6c049ca0
+14: [2020-Feb-11 09:44:35.973152] - tcpServer::doAccept() - create conn obj-------
+15: [2020-Feb-11 09:44:35.973518] - CDevice::DoMediaReg() - devid:30013, bussid(BussType_chn_streamtype): 1_0_0
+16: [2020-Feb-11 09:44:35.973662] - COMMON::connObj::SendData() - conn: 0x0x7ffb6c049ca0, packet len: 16. strand post doWrite...
+17: [2020-Feb-11 09:44:35.973728] - [dsdk] DeviceManager::build_conn_device_map() - session x0x7ffb6c049ca0 existed, device obj NULL, update session ------- 
+
+18: [2020-Feb-11 09:44:35.973876] - COMMON::connObj::SendData() - conn: 0x0x7ffb6c049ca0, packet len: 8. strand post doWrite...

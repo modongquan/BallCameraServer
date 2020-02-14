@@ -1,0 +1,53 @@
+0: [2020-Feb-12 16:52:49.058938] - CConfig::SetPath() - cannot open file, /mnt/teamway/atlas/BallCameraServer/qt-build/../config/global.ini
+1: [2020-Feb-12 16:52:49.059175] - YH Device SDK, compiled Jan  6 2020, 14:30:29, copyrights (c) 2018.
+2: [2020-Feb-12 16:52:49.059209] - LOG Begin(dev sdk): control::Init() - process: /mnt/teamway/atlas/BallCameraServer/qt-build/BallCameraServer(28175)
+3: [2020-Feb-12 16:52:49.059287] - [devsdk]control::Init() - CDevice::m_objTask.Start()!
+4: [2020-Feb-12 16:52:49.059677] - tcpServer::doAccept() - create conn obj-------
+5: [2020-Feb-12 16:52:49.059738] - [devsdk] control::Init() - listen 10.0.48.66 @ 6608...
+6: [2020-Feb-12 16:52:57.183177] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x4dd34c0
+7: [2020-Feb-12 16:52:57.183460] - tcpServer::doAccept() - create conn obj-------
+8: [2020-Feb-12 16:52:57.203001] - COMMON::connObj::SendData() - conn: 0x0x4dd34c0, packet len: 60. strand post doWrite...
+9: [2020-Feb-12 16:52:57.203186] - [dsdk] DeviceManager::build_conn_device_map() - session x0x4dd34c0 existed, device obj NULL, update session ------- 
+
+10: [2020-Feb-12 16:52:57.203280] - [devsdk]DeviceManger::DoProc() - do signal reg - {"eventtype":"26","deviceid":"30013","channels":"1","type":"4108","nettype":"2","disktype":"1","factorytype":"18","audiotype":"1","addr":"10.0.48.70:53502","desc":"register"}
+11: [2020-Feb-12 16:52:58.061256] - COMMON::connObj::SendData() - conn: 0x0x4dd34c0, packet len: 99. strand post doWrite...
+12: [2020-Feb-12 16:52:58.061419] - CDevice::SendOpenStreamCmd() - hSession: 0x0x4dd34c0, ret: 0x0. cmd len: 99, cmd str: $$dc0090,1,C508,30013,,200212 165258,6B8B4567-23C6-327B-A998-3C6473483366,1,0,0,0,10.0.48.66,6608,#
+13: [2020-Feb-12 16:52:58.144408] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7f66d0049ca0
+14: [2020-Feb-12 16:52:58.144623] - tcpServer::doAccept() - create conn obj-------
+15: [2020-Feb-12 16:52:58.146566] - CDevice::DoMediaReg() - devid:30013, bussid(BussType_chn_streamtype): 1_0_0
+16: [2020-Feb-12 16:52:58.146750] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 16. strand post doWrite...
+17: [2020-Feb-12 16:52:58.146820] - [dsdk] DeviceManager::build_conn_device_map() - session x0x7f66d0049ca0 existed, device obj NULL, update session ------- 
+
+18: [2020-Feb-12 16:52:58.147200] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+19: [2020-Feb-12 16:53:04.084318] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+20: [2020-Feb-12 16:53:04.084397] - sds::device::CDevice::SendHeartM succ 30013 
+
+21: [2020-Feb-12 16:53:10.756577] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+22: [2020-Feb-12 16:53:10.756636] - sds::device::CDevice::SendHeartM succ 30013 
+
+23: [2020-Feb-12 16:53:18.061209] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+24: [2020-Feb-12 16:53:18.061260] - sds::device::CDevice::SendHeartM succ 30013 
+
+25: [2020-Feb-12 16:53:25.387022] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+26: [2020-Feb-12 16:53:25.387085] - sds::device::CDevice::SendHeartM succ 30013 
+
+27: [2020-Feb-12 16:53:32.688251] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+28: [2020-Feb-12 16:53:32.688299] - sds::device::CDevice::SendHeartM succ 30013 
+
+29: [2020-Feb-12 16:53:39.991174] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+30: [2020-Feb-12 16:53:39.991227] - sds::device::CDevice::SendHeartM succ 30013 
+
+31: [2020-Feb-12 16:53:47.303881] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+32: [2020-Feb-12 16:53:47.303933] - sds::device::CDevice::SendHeartM succ 30013 
+
+33: [2020-Feb-12 16:53:54.599523] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+34: [2020-Feb-12 16:53:54.599575] - sds::device::CDevice::SendHeartM succ 30013 
+
+35: [2020-Feb-12 16:53:57.281392] - COMMON::connObj::SendData() - conn: 0x0x4dd34c0, packet len: 37. strand post doWrite...
+36: [2020-Feb-12 16:54:05.567806] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+37: [2020-Feb-12 16:54:05.567857] - sds::device::CDevice::SendHeartM succ 30013 
+
+38: [2020-Feb-12 16:54:09.215053] - [devsds]CDevice::DoFrame() - dev:30013,  recv frames 1000,  bytes 9915316 ------
+39: [2020-Feb-12 16:54:12.866912] - COMMON::connObj::SendData() - conn: 0x0x7f66d0049ca0, packet len: 8. strand post doWrite...
+40: [2020-Feb-12 16:54:12.866962] - sds::device::CDevice::SendHeartM succ 30013 
+

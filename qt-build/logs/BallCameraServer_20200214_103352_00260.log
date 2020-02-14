@@ -1,0 +1,72 @@
+0: [2020-Feb-14 10:33:52.665073] - CConfig::SetPath() - cannot open file, /mnt/teamway/atlas/BallCameraServer/qt-build/../config/global.ini
+1: [2020-Feb-14 10:33:52.665238] - YH Device SDK, compiled Jan  6 2020, 14:30:29, copyrights (c) 2018.
+2: [2020-Feb-14 10:33:52.665272] - LOG Begin(dev sdk): control::Init() - process: /mnt/teamway/atlas/BallCameraServer/qt-build/BallCameraServer(19244)
+3: [2020-Feb-14 10:33:52.665565] - [devsdk]control::Init() - CDevice::m_objTask.Start()!
+4: [2020-Feb-14 10:33:52.678323] - tcpServer::doAccept() - create conn obj-------
+5: [2020-Feb-14 10:33:52.678418] - [devsdk] control::Init() - listen 10.0.48.66 @ 6608...
+6: [2020-Feb-14 10:33:54.511584] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x3a091c0
+7: [2020-Feb-14 10:33:54.511720] - tcpServer::doAccept() - create conn obj-------
+8: [2020-Feb-14 10:33:54.531225] - COMMON::connObj::SendData() - conn: 0x0x3a091c0, packet len: 60. strand post doWrite...
+9: [2020-Feb-14 10:33:54.531405] - [dsdk] DeviceManager::build_conn_device_map() - session x0x3a091c0 existed, device obj NULL, update session ------- 
+
+10: [2020-Feb-14 10:33:54.531493] - [devsdk]DeviceManger::DoProc() - do signal reg - {"eventtype":"26","deviceid":"30013","channels":"1","type":"4108","nettype":"2","disktype":"1","factorytype":"18","audiotype":"1","addr":"10.0.48.70:52777","desc":"register"}
+11: [2020-Feb-14 10:33:54.679226] - COMMON::connObj::SendData() - conn: 0x0x3a091c0, packet len: 99. strand post doWrite...
+12: [2020-Feb-14 10:33:54.679385] - CDevice::SendOpenStreamCmd() - hSession: 0x0x3a091c0, ret: 0x0. cmd len: 99, cmd str: $$dc0090,1,C508,30013,,200214 103354,6B8B4567-23C6-327B-A998-3C6473483366,1,0,0,0,10.0.48.66,6608,#
+13: [2020-Feb-14 10:33:54.774124] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4049ca0
+14: [2020-Feb-14 10:33:54.774551] - tcpServer::doAccept() - create conn obj-------
+15: [2020-Feb-14 10:33:54.775456] - CDevice::DoMediaReg() - devid:30013, bussid(BussType_chn_streamtype): 1_0_0
+16: [2020-Feb-14 10:33:54.775593] - COMMON::connObj::SendData() - conn: 0x0x7fffc4049ca0, packet len: 16. strand post doWrite...
+17: [2020-Feb-14 10:33:54.775654] - [dsdk] DeviceManager::build_conn_device_map() - session x0x7fffc4049ca0 existed, device obj NULL, update session ------- 
+
+18: [2020-Feb-14 10:33:54.776124] - COMMON::connObj::SendData() - conn: 0x0x7fffc4049ca0, packet len: 8. strand post doWrite...
+19: [2020-Feb-14 10:39:35.276720] - COMMON::connObj::SendData() - conn: 0x0x3a091c0, packet len: 37. strand post doWrite...
+20: [2020-Feb-14 10:39:35.276895] - COMMON::connObj::SendData() - conn: 0x0x3a091c0, packet len: 37. strand post doWrite...
+21: [2020-Feb-14 10:39:35.277040] - COMMON::connObj::handle_read() - conn: 0x0x3a091c0, fail: End of file
+22: [2020-Feb-14 10:39:35.277094] - COMMON::connObj::handle_close() - conn: 0x0x3a091c0
+23: [2020-Feb-14 10:39:35.277180] - [devsdk]NetManager::OnEventCB() - offline event, session(connobj): 0x0x3a091c0, create arp of EVENT_TYPE_OFFLINE.
+24: [2020-Feb-14 10:39:35.277450] - sds::device::CDevice::SendHeart fail 30013 
+
+25: [2020-Feb-14 10:39:35.277983] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4091290
+26: [2020-Feb-14 10:39:35.278095] - tcpServer::doAccept() - create conn obj-------
+27: [2020-Feb-14 10:39:35.278666] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4033b60
+28: [2020-Feb-14 10:39:35.278829] - tcpServer::doAccept() - create conn obj-------
+29: [2020-Feb-14 10:39:35.279480] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4034890
+30: [2020-Feb-14 10:39:35.279650] - tcpServer::doAccept() - create conn obj-------
+31: [2020-Feb-14 10:39:35.280217] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc40355c0
+32: [2020-Feb-14 10:39:35.280361] - tcpServer::doAccept() - create conn obj-------
+33: [2020-Feb-14 10:39:35.280913] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc40362f0
+34: [2020-Feb-14 10:39:35.281072] - tcpServer::doAccept() - create conn obj-------
+35: [2020-Feb-14 10:39:35.281316] - [devsdk]DeviceManager::DoProc() - arp: 0x0x7fffa800abe0, device 30013 is existed, close it... ----
+
+37: [2020-Feb-14 10:39:35.281447] - [devsdk] NetManager::CloseConn() - conn type: server, close conn: 0x0x7fffc40362f0
+
+36: [2020-Feb-14 10:39:35.281436] - [devsdk]DeviceManager::DoProc() - arp: 0x0x7fff9c00abe0, device 30013 is existed, close it... ----
+
+38: [2020-Feb-14 10:39:35.281466] - [devsdk] NetManager::CloseConn() - conn type: server, close conn: 0x0x7fffc40355c0
+
+39: [2020-Feb-14 10:39:35.281535] - [devsdk]DeviceManager::DoProc() - arp: 0x0x7fffa000abe0, device 30013 is existed, close it... ----
+
+40: [2020-Feb-14 10:39:35.281558] - [devsdk] NetManager::CloseConn() - conn type: server, close conn: 0x0x7fffc4034890
+
+41: [2020-Feb-14 10:39:35.281594] - [devsdk]DeviceManager::DoProc() - arp: 0x0x7fffa400abe0, device 30013 is existed, close it... ----
+
+42: [2020-Feb-14 10:39:35.281614] - [devsdk] NetManager::CloseConn() - conn type: server, close conn: 0x0x7fffc4091290
+
+43: [2020-Feb-14 10:39:35.281655] - COMMON::connObj::SendData() - conn: 0x0x7fffc4033b60, packet len: 60. strand post doWrite...
+44: [2020-Feb-14 10:39:35.281677] - [dsdk] DeviceManager::build_conn_device_map() - session x0x7fffc4033b60 existed, device obj NULL, update session ------- 
+
+45: [2020-Feb-14 10:39:35.281695] - [devsdk]DeviceManger::DoProc() - do signal reg - {"eventtype":"26","deviceid":"30013","channels":"1","type":"4108","nettype":"2","disktype":"1","factorytype":"18","audiotype":"1","addr":"10.0.48.70:52810","desc":"register"}
+46: [2020-Feb-14 10:39:35.281722] - COMMON::connObj::handle_read() - conn: 0x0x7fffc4033b60, fail: End of file
+47: [2020-Feb-14 10:39:35.281733] - COMMON::connObj::handle_close() - conn: 0x0x7fffc4033b60
+48: [2020-Feb-14 10:39:35.281746] - [devsdk]NetManager::OnEventCB() - offline event, session(connobj): 0x0x7fffc4033b60, create arp of EVENT_TYPE_OFFLINE.
+49: [2020-Feb-14 10:39:35.281807] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4037020
+50: [2020-Feb-14 10:39:35.281853] - tcpServer::doAccept() - create conn obj-------
+51: [2020-Feb-14 10:40:43.203879] - CDevice::SendOpenStreamCmd() - hSession: 0x0x7fffc4033b60, ret: 0xe0000501. cmd len: 99, cmd str: $$dc0090,0,C508,30013,,200214 104043,74B0DC51-5CFF-1949-8A94-E82AEC585562,1,0,0,0,10.0.48.66,6608,#
+52: [2020-Feb-14 10:40:43.204202] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc4037d10
+53: [2020-Feb-14 10:40:43.204264] - tcpServer::doAccept() - create conn obj-------
+54: [2020-Feb-14 10:40:43.204320] - [dsdk] DeviceManager::DoProc() - connection online, hSession: 0x0x7fffc416f110
+55: [2020-Feb-14 10:40:43.204346] - tcpServer::doAccept() - create conn obj-------
+56: [2020-Feb-14 10:40:43.204405] - COMMON::connObj::SendData() - conn: 0x0x7fffc416f110, packet len: 60. strand post doWrite...
+57: [2020-Feb-14 10:40:43.204426] - [dsdk] DeviceManager::build_conn_device_map() - session x0x7fffc416f110 existed, device obj NULL, update session ------- 
+
+58: [2020-Feb-14 10:40:43.204446] - [devsdk]DeviceManger::DoProc() - do signal reg - {"eventtype":"26","deviceid":"30013","channels":"1","type":"4108","nettype":"2","disktype":"1","factorytype":"18","audiotype":"1","addr":"10.0.48.70:52841","desc":"register"}
