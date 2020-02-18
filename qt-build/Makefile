@@ -52,9 +52,11 @@ OBJECTS_DIR   = ./
 
 ####### Files
 
-SOURCES       = ../src/main.cpp \
+SOURCES       = ../src/QueueBuf.cpp \
+		../src/main.cpp \
 		../src/qtplayer.cpp moc_qtplayer.cpp
-OBJECTS       = main.o \
+OBJECTS       = QueueBuf.o \
+		main.o \
 		qtplayer.o \
 		moc_qtplayer.o
 DIST          = ../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/spec_pre.prf \
@@ -230,10 +232,12 @@ DIST          = ../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/spec_p
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/exceptions.prf \
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/yacc.prf \
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/lex.prf \
-		../pro/BallCameraServer.pro ../inc/cms_errcode.h \
+		../pro/BallCameraServer.pro ../src/QueueBuf.h \
+		../inc/cms_errcode.h \
 		../inc/SDS_Device_Api.h \
 		../inc/SDS_Device_DataDefine.h \
-		../src/qtplayer.h ../src/main.cpp \
+		../src/qtplayer.h ../src/QueueBuf.cpp \
+		../src/main.cpp \
 		../src/qtplayer.cpp
 QMAKE_TARGET  = BallCameraServer
 DESTDIR       = 
@@ -610,8 +614,8 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents ../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents ../inc/cms_errcode.h ../inc/SDS_Device_Api.h ../inc/SDS_Device_DataDefine.h ../src/qtplayer.h $(DISTDIR)/
-	$(COPY_FILE) --parents ../src/main.cpp ../src/qtplayer.cpp $(DISTDIR)/
+	$(COPY_FILE) --parents ../src/QueueBuf.h ../inc/cms_errcode.h ../inc/SDS_Device_Api.h ../inc/SDS_Device_DataDefine.h ../src/qtplayer.h $(DISTDIR)/
+	$(COPY_FILE) --parents ../src/QueueBuf.cpp ../src/main.cpp ../src/qtplayer.cpp $(DISTDIR)/
 
 
 clean: compiler_clean 
@@ -781,6 +785,9 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ####### Compile
 
+QueueBuf.o: ../src/QueueBuf.cpp ../src/QueueBuf.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o QueueBuf.o ../src/QueueBuf.cpp
+
 main.o: ../src/main.cpp ../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/QApplication \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/qapplication.h \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/qtwidgetsglobal.h \
@@ -910,6 +917,7 @@ main.o: ../src/main.cpp ../../../../application/Qt/5.12.6/gcc_64/include/QtWidge
 		../../../../application/Qt/5.12.6/gcc_64/include/QtCore/QTimer \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtCore/qtimer.h \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtCore/qbasictimer.h \
+		../src/QueueBuf.h \
 		../inc/libavutil/avutil.h \
 		../inc/libavutil/common.h \
 		../inc/libavutil/attributes.h \

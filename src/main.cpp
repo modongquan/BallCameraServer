@@ -17,6 +17,7 @@ typedef unsigned int DWORD;
 #include "SDS_Device_Api.h"
 #include "cms_errcode.h"
 #include "qtplayer.h"
+#include "QueueBuf.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -51,7 +52,6 @@ typedef void (*EventHandleDef)(const char*);
 typedef struct
 {
     uint8_t *pRgb;
-    uint8_t reserve[4];
     uint32_t size;
 }StruDefRgbData;
 
@@ -61,7 +61,9 @@ bool is_dev_ready = false;
 _handle StreamHdl;
 
 uint8_t H264DataBuf[H264_DATA_BUF_SIZE];
-uint32_t H264DataIdx = 0;
+int32_t H264DataIdx = 0;
+bool is_first_iframe_recv = false;
+bool is_skip_frame = false;
 
 QtPlayer *pVideoPlayer;
 uint32_t video_w = 0;
@@ -82,18 +84,19 @@ struct timespec end;
 bool CheckRgbWrBuf(uint32_t rgb_size)
 {
     uint32_t wr_idx = QueueWrIdx;
-    uint32_t rd_idx = QueueRdIdx;
-    uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb;
-    uint8_t *pRd = RgbDataQueue[rd_idx].pRgb;
 
     do{
+        uint32_t rd_idx = QueueRdIdx;
+        uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb;
+        uint8_t *pRd = RgbDataQueue[rd_idx].pRgb;
+
         uint32_t diff = static_cast<uint32_t>((pWr >= pRd)?(pWr - pRd):(pWr + DISP_DATA_BUF_SIZE - pRd));
         if(diff + rgb_size > DISP_DATA_BUF_SIZE)
         {
             printf("write the current frame to preview display buf \n");
             fflush(stdout);
 
-            wr_idx = (wr_idx > 0)?(wr_idx - 1):0;
+            wr_idx = (wr_idx > 0)?(wr_idx - 1):(RGB_DATA_QUEUE_NUM - 1);
             if(wr_idx == rd_idx)
             {
                 return false;
@@ -317,7 +320,8 @@ typedef struct tagBITMAPINFOHEADER{
     uint32_t biClrImportant;//4 位图显示过程中重要的颜色数
 } BITMAPINFOHEADER;//该结构占据40个字节。
 #pragma end
-
+#pragma pack()
+#pragma end
 bool CreateBmp(const char *filename, uint8_t *pRGBBuffer, int32_t width, int32_t height, uint16_t bpp)
 {
     BITMAPFILEHEADER bmpheader;
@@ -404,9 +408,9 @@ void YuvToRgb(AVCodecContext *pCodecCtx, AVFrame *pFrame)
         video_h = pFrame->height;
     }while(0);
 
-    char file_name[128];
-    snprintf(file_name, 128, "%s%d%s", test, counter++, ".bmp");
-    CreateBmp(file_name, pRgbFrame->data[0], pFrame->width, pFrame->height, 32);
+    //    char file_name[128];
+    //    snprintf(file_name, 128, "%s%d%s", test, counter++, ".bmp");
+    //    CreateBmp(file_name, pRgbFrame->data[0], pFrame->width, pFrame->height, 32);
 
     if(pRgbBuf) av_free(pRgbBuf);
     if(pRgbFrame) av_frame_free(&pRgbFrame);
@@ -476,14 +480,12 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt)
             fprintf(stderr, "Error during decoding\n");
             return;
         }
-
+//        SaveImageDataoFile(frame, "./test.jpg");
         YuvToRgb(dec_ctx, frame);
-        //        printf("saving frame %3d\n", dec_ctx->frame_number);
-        //        fflush(stdout);
     }
 }
 
-int FrameDecode(uint8_t *pFrame, uint32_t frame_size)
+int FrameDecode(void)
 {
     const AVCodec *codec = nullptr;
     AVCodecParserContext *parser = nullptr;
@@ -491,8 +493,33 @@ int FrameDecode(uint8_t *pFrame, uint32_t frame_size)
     AVFrame *frame = nullptr;
     int ret = -1;
     AVPacket *pkt = nullptr;
+    uint8_t *pDecBuf = nullptr;
+    uint32_t decode_size;
 
     do{
+        decode_size = GetRdDataSize(H264DataIdx);
+        if(decode_size == 0)
+        {
+            fprintf(stderr, "%s : get decode data size is zero \n", __FUNCTION__);
+            fflush(stderr);
+            break;
+        }
+
+        pDecBuf = (uint8_t *)av_malloc(decode_size);
+        if(pDecBuf == nullptr)
+        {
+            fprintf(stderr, "%s : molloc fail for decode data \n", __FUNCTION__);
+            fflush(stderr);
+            break;
+        }
+
+        if(ReadData(H264DataIdx, pDecBuf) < 0)
+        {
+            fprintf(stderr, "%s : read data fail to decode \n", __FUNCTION__);
+            fflush(stderr);
+            break;
+        }
+
         pkt = av_packet_alloc();
         if (!pkt)
             break;
@@ -532,65 +559,37 @@ int FrameDecode(uint8_t *pFrame, uint32_t frame_size)
             break;
         }
 
-
         /* use the parser to split the data into frames */
-        uint8_t *data = pFrame;
-        int data_size = static_cast<int>(frame_size);
-        while(data_size > 0)
+        uint8_t *pData = pDecBuf;
+        while(decode_size > 0)
         {
             ret = av_parser_parse2(parser, c, &pkt->data, &pkt->size,
-                                   data, data_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+                                   pData, decode_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
             if (ret < 0) {
                 fprintf(stderr, "Error while parsing\n");
                 break;
             }
-            //            printf("pack size = %d \n", pkt->size);
-            //            switch (parser->pict_type) {
-            //            case AV_PICTURE_TYPE_I:
-            //                printf("I Frame \n");
-            //                break;
-            //            case AV_PICTURE_TYPE_B:
-            //                printf("B Frame \n");
-            //                break;
-            //            case AV_PICTURE_TYPE_P:
-            //                printf("P Frame \n");
-            //                break;
-            //            default:
-            //                printf("invalid Frame \n");
-            //                break;
-            //            }
 
             /* flush the decoder */
             if(pkt->size)
                 decode(c, frame, pkt);
 
-            data += ret;
-            data_size -= ret;
+            pData += ret;
+            decode_size -= ret;
         }
         decode(c, frame, nullptr);
 
-        if(data_size == 0)
+        if(decode_size == 0)
         {
             ret = 0;
         }
     }while(0);
 
-    if(parser)
-    {
-        av_parser_close(parser);
-    }
-    if(c)
-    {
-        avcodec_free_context(&c);
-    }
-    if(frame)
-    {
-        av_frame_free(&frame);
-    }
-    if(pkt)
-    {
-        av_packet_free(&pkt);
-    }
+    if(pDecBuf) av_free(pDecBuf);
+    if(parser) av_parser_close(parser);
+    if(c) avcodec_free_context(&c);
+    if(frame) av_frame_free(&frame);
+    if(pkt) av_packet_free(&pkt);
 
     return ret;
 }
@@ -600,10 +599,19 @@ bool ReadRgb(uint8_t *pOut, uint32_t *pW, uint32_t *pH)
     if(pOut)
     {
         uint32_t rd_idx = QueueRdIdx;
+        uint32_t wr_idx = QueueWrIdx;
 
         if(rd_idx == QueueWrIdx)
         {
             return false;
+        }
+
+        uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + RGB_DATA_QUEUE_NUM - rd_idx);
+        if(diff >= 5)
+        {
+            printf("skip forward 5 frame \n");
+            fflush(stdout);
+            rd_idx = (rd_idx + 5 < RGB_DATA_QUEUE_NUM)?(rd_idx + 5):(rd_idx + 5 - RGB_DATA_QUEUE_NUM);
         }
 
         if(RgbDataQueue[rd_idx].size == 0)
@@ -649,13 +657,12 @@ bool ReadRgb(uint8_t *pOut, uint32_t *pW, uint32_t *pH)
     {
         return false;
     }
-
-
 }
 
 int CALLBACK EventHandle(long long llUserData, const char* strEvent, int event_type)
 {
     printf("event type = %d , event = %s \n", event_type, strEvent);
+    fflush(stdout);
 
     EventHandleDef pEventHdl = EventHdl[event_type];
     if(pEventHdl)
@@ -665,39 +672,40 @@ int CALLBACK EventHandle(long long llUserData, const char* strEvent, int event_t
 
 int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long llStamp, int type, int channel, long long llUserData)
 {
-    //        printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
-    //        fflush(stdout);
+//    printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
+//    fflush(stdout);
 #if 1
     switch (type)
     {
     case em_FrameType_Header_Frame:
         break;
     case em_FrameType_Video_IFrame:
-        if(H264DataIdx > 0)
+        if(is_first_iframe_recv)
         {
-            clock_gettime(CLOCK_REALTIME, &start);
-            FrameDecode(H264DataBuf, H264DataIdx);
-            clock_gettime(CLOCK_REALTIME, &end);
-            int64_t diff_time = (end.tv_sec - start.tv_sec) * 1000L + (end.tv_nsec - start.tv_nsec) / 1000000L;
-            printf("decode time = %ld \n", diff_time);
-            fflush(stdout);
+            SetNextWrBuf(H264DataIdx);
+        }
+        else
+        {
+            is_first_iframe_recv = true;
         }
 
-        memset(H264DataBuf, 0, H264DataIdx);
-        memcpy(H264DataBuf, lpBuf, static_cast<uint32_t>(size));
-        H264DataIdx = static_cast<uint32_t>(size);
-        break;
-    case em_FrameType_Video_VFrame:
-    {
-        if(H264DataIdx + static_cast<uint32_t>(size) > H264_DATA_BUF_SIZE)
+        if(CheckWrDataSeg(H264DataIdx, size) < 0)
         {
-            printf("H264DataBuf out \n");
-            fflush(stdout);
+            is_skip_frame = true;
             break;
         }
 
-        memcpy(H264DataBuf + H264DataIdx, lpBuf, static_cast<uint32_t>(size));
-        H264DataIdx += static_cast<uint32_t>(size);
+        InsertData(H264DataIdx, lpBuf, static_cast<uint32_t>(size));
+        break;
+    case em_FrameType_Video_VFrame:
+    {
+        if(is_skip_frame) break;
+
+        if(is_first_iframe_recv)
+        {
+            if(CheckWrSubDataSeg(H264DataIdx, size) < 0) break;
+            InsertData(H264DataIdx, lpBuf, static_cast<uint32_t>(size));
+        }
         break;
     }
     default:
@@ -739,22 +747,25 @@ void *main_proc(void *arg)
             is_dev_ready = false;
         }
 
-        fflush(stdout);
-        sleep(1);
+        if(GetRdDataSize(H264DataIdx) > 0)
+        {
+            FrameDecode();
+        }
+
+        usleep(30000);
     }
 }
 
 int main(int argc, char *argv[])
 {
-    printf("argc = %d, argv = %p \n", argc, static_cast<void *>(argv));
     QApplication a(argc, argv);
 
-//    enum AVHWDeviceType type;
-//    while((type = av_hwdevice_iterate_types(type)) != AV_HWDEVICE_TYPE_NONE)
-//    {
-//        fprintf(stdout, " %s \n", av_hwdevice_get_type_name(type));
-//        fflush(stdout);
-//    }
+    //    enum AVHWDeviceType type;
+    //    while((type = av_hwdevice_iterate_types(type)) != AV_HWDEVICE_TYPE_NONE)
+    //    {
+    //        fprintf(stdout, " %s \n", av_hwdevice_get_type_name(type));
+    //        fflush(stdout);
+    //    }
 
     EventHandleInit();
 
@@ -763,8 +774,22 @@ int main(int argc, char *argv[])
 
     memset((void *)RgbDataQueue, 0, sizeof(StruDefRgbData) * RGB_DATA_QUEUE_NUM);
     RgbDataQueue[0].pRgb = DispDataBuf;
-    printf("DispDataBuf = (0x%x - 0x%x) \n", DispDataBuf, DispDataBuf + DISP_DATA_BUF_SIZE);
-    fflush(stdout);
+    //    printf("DispDataBuf = (0x%x - 0x%x) \n", DispDataBuf, DispDataBuf + DISP_DATA_BUF_SIZE);
+    //    fflush(stdout);
+
+    if(QueueBufInit(256) < 0)
+    {
+        fprintf(stderr, "QueueBufInit err \n");
+        fflush(stderr);
+        return -1;
+    }
+    H264DataIdx = QueueBufRegister(H264DataBuf, H264_DATA_BUF_SIZE, 256, 256);
+    if(H264DataIdx < 0)
+    {
+        fprintf(stderr, "QueueBufRegister err \n");
+        fflush(stderr);
+        return -1;
+    }
 
     st_work_param work_param;
     const char server_ip[] = {"10.0.48.66"};

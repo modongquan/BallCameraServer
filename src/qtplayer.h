@@ -18,8 +18,6 @@ private slots:
     void PlayerProc();
 
 private:
-    uint32_t FillBmpHead(uint8_t *pHeadBuf, int32_t width, int32_t height, uint16_t bpp);
-
     void paintEvent(QPaintEvent *e) override;
 //    void paintGL() override;
 
