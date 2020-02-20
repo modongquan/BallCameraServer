@@ -40,7 +40,7 @@ DISTNAME      = BallCameraServer1.0.0
 DISTDIR = /mnt/teamway/atlas/BallCameraServer/qt-build/.tmp/BallCameraServer1.0.0
 LINK          = g++
 LFLAGS        = -Wl,-rpath,/mnt/application/Qt/5.12.6/gcc_64/lib
-LIBS          = $(SUBLIBS) -L../lib -lSDS_Device_Sdk -lSDS_BusinessBase -lSDS_Utility -lboost_log -lboost_filesystem -lboost_system -lboost_thread -lboost_date_time -lavformat -lavcodec -lavutil -lswresample -lswscale /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5OpenGL.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Widgets.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Gui.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Core.so -lGL -lpthread   
+LIBS          = $(SUBLIBS) -L../lib -lSDS_Device_Sdk -lSDS_BusinessBase -lSDS_Utility -lboost_log -lboost_filesystem -lboost_system -lboost_thread -lboost_date_time -lavformat -lavcodec -lavutil -lswresample -lswscale -lpostproc -lavfilter /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5OpenGL.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Widgets.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Gui.so /mnt/application/Qt/5.12.6/gcc_64/lib/libQt5Core.so -lGL -lpthread   
 AR            = ar cqs
 RANLIB        = 
 SED           = sed
@@ -52,10 +52,12 @@ OBJECTS_DIR   = ./
 
 ####### Files
 
-SOURCES       = ../src/QueueBuf.cpp \
+SOURCES       = ../src/EventParser.cpp \
+		../src/QueueBuf.cpp \
 		../src/main.cpp \
 		../src/qtplayer.cpp moc_qtplayer.cpp
-OBJECTS       = QueueBuf.o \
+OBJECTS       = EventParser.o \
+		QueueBuf.o \
 		main.o \
 		qtplayer.o \
 		moc_qtplayer.o
@@ -232,11 +234,13 @@ DIST          = ../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/spec_p
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/exceptions.prf \
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/yacc.prf \
 		../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/lex.prf \
-		../pro/BallCameraServer.pro ../src/QueueBuf.h \
+		../pro/BallCameraServer.pro ../src/EventParser.h \
+		../src/QueueBuf.h \
 		../inc/cms_errcode.h \
 		../inc/SDS_Device_Api.h \
 		../inc/SDS_Device_DataDefine.h \
-		../src/qtplayer.h ../src/QueueBuf.cpp \
+		../src/qtplayer.h ../src/EventParser.cpp \
+		../src/QueueBuf.cpp \
 		../src/main.cpp \
 		../src/qtplayer.cpp
 QMAKE_TARGET  = BallCameraServer
@@ -614,8 +618,8 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents ../../../../application/Qt/5.12.6/gcc_64/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents ../src/QueueBuf.h ../inc/cms_errcode.h ../inc/SDS_Device_Api.h ../inc/SDS_Device_DataDefine.h ../src/qtplayer.h $(DISTDIR)/
-	$(COPY_FILE) --parents ../src/QueueBuf.cpp ../src/main.cpp ../src/qtplayer.cpp $(DISTDIR)/
+	$(COPY_FILE) --parents ../src/EventParser.h ../src/QueueBuf.h ../inc/cms_errcode.h ../inc/SDS_Device_Api.h ../inc/SDS_Device_DataDefine.h ../src/qtplayer.h $(DISTDIR)/
+	$(COPY_FILE) --parents ../src/EventParser.cpp ../src/QueueBuf.cpp ../src/main.cpp ../src/qtplayer.cpp $(DISTDIR)/
 
 
 clean: compiler_clean 
@@ -785,6 +789,9 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 ####### Compile
 
+EventParser.o: ../src/EventParser.cpp ../src/EventParser.h
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o EventParser.o ../src/EventParser.cpp
+
 QueueBuf.o: ../src/QueueBuf.cpp ../src/QueueBuf.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o QueueBuf.o ../src/QueueBuf.cpp
 
@@ -897,10 +904,6 @@ main.o: ../src/main.cpp ../../../../application/Qt/5.12.6/gcc_64/include/QtWidge
 		../../../../application/Qt/5.12.6/gcc_64/include/QtGui/qtouchdevice.h \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtGui/qguiapplication.h \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtGui/qinputmethod.h \
-		../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/QMainWindow \
-		../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/qmainwindow.h \
-		../../../../application/Qt/5.12.6/gcc_64/include/QtWidgets/qtabwidget.h \
-		../../../../application/Qt/5.12.6/gcc_64/include/QtGui/qicon.h \
 		../inc/SDS_Device_DataDefine.h \
 		../inc/SDS_Device_Api.h \
 		../inc/cms_errcode.h \
@@ -918,6 +921,7 @@ main.o: ../src/main.cpp ../../../../application/Qt/5.12.6/gcc_64/include/QtWidge
 		../../../../application/Qt/5.12.6/gcc_64/include/QtCore/qtimer.h \
 		../../../../application/Qt/5.12.6/gcc_64/include/QtCore/qbasictimer.h \
 		../src/QueueBuf.h \
+		../src/EventParser.h \
 		../inc/libavutil/avutil.h \
 		../inc/libavutil/common.h \
 		../inc/libavutil/attributes.h \
@@ -933,20 +937,25 @@ main.o: ../src/main.cpp ../../../../application/Qt/5.12.6/gcc_64/include/QtWidge
 		../inc/libavutil/pixfmt.h \
 		../inc/libavutil/imgutils.h \
 		../inc/libavutil/pixdesc.h \
-		../inc/libavformat/avio.h \
+		../inc/libavutil/hwcontext.h \
+		../inc/libavutil/buffer.h \
+		../inc/libavutil/frame.h \
 		../inc/libavutil/dict.h \
+		../inc/libavutil/samplefmt.h \
+		../inc/libavutil/opt.h \
+		../inc/libavformat/avio.h \
 		../inc/libavformat/version.h \
 		../inc/libavformat/avformat.h \
 		../inc/libavcodec/avcodec.h \
-		../inc/libavutil/samplefmt.h \
-		../inc/libavutil/buffer.h \
 		../inc/libavutil/cpu.h \
 		../inc/libavutil/channel_layout.h \
-		../inc/libavutil/frame.h \
-		../inc/libavutil/hwcontext.h \
 		../inc/libavcodec/version.h \
 		../inc/libswscale/swscale.h \
-		../inc/libswscale/version.h
+		../inc/libswscale/version.h \
+		../inc/libavfilter/buffersink.h \
+		../inc/libavfilter/avfilter.h \
+		../inc/libavfilter/version.h \
+		../inc/libavfilter/buffersrc.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o ../src/main.cpp
 
 qtplayer.o: ../src/qtplayer.cpp ../src/qtplayer.h \

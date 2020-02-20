@@ -223,8 +223,8 @@ void SetNextWrBuf(uint32_t idx)
     pQueueBuf[idx].SubSegWrIdx = 0;
     pQueueBuf[idx].pSubQueue[0].pDataSeg = pWrEnd;
 
-    printf("wr data buf = (%p - %p) \n", pWrStart, pWrEnd);
-    fflush(stdout);
+//    printf("wr data buf = (%p - %p) \n", pWrStart, pWrEnd);
+//    fflush(stdout);
 }
 
 uint32_t GetRdDataSize(uint32_t idx)
@@ -248,15 +248,11 @@ int32_t ReadData(uint32_t idx, uint8_t *pOut)
         return -1;
     }
 
-    uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + pQueueBuf[idx].QueueDataSegNum - rd_idx);
-    if(diff >= 2)
-    {
-//        printf("skip forward 5 frame \n");
-//        fflush(stdout);
-//        rd_idx = (rd_idx + 5 < pQueueBuf[idx].QueueDataSegNum)?(rd_idx + 5):(rd_idx + 5 - pQueueBuf[idx].QueueDataSegNum);
-        printf("run here \n");
-        fflush(stdout);
-    }
+//    uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + pQueueBuf[idx].QueueDataSegNum - rd_idx);
+//    if(diff >= 2)
+//    {
+
+//    }
 
     if(pQueueBuf[idx].pQueueDataSeg[rd_idx].size == 0)
     {
@@ -276,8 +272,8 @@ int32_t ReadData(uint32_t idx, uint8_t *pOut)
         memcpy(pOut + cpy_size, pQueueBuf[idx].start, rd_size - cpy_size);
     }
 
-    printf("rd data buf = (%p - %p) \n",static_cast<void *>(pData), pQueueBuf[idx].pQueueDataSeg[rd_idx + 1].pDataSeg);
-    fflush(stdout);
+//    printf("rd data buf = (%p - %p) \n",static_cast<void *>(pData), pQueueBuf[idx].pQueueDataSeg[rd_idx + 1].pDataSeg);
+//    fflush(stdout);
 
     pQueueBuf[idx].pQueueDataSeg[rd_idx].pDataSeg = nullptr;
     pQueueBuf[idx].pQueueDataSeg[rd_idx].size = 0;

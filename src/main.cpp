@@ -5,9 +5,10 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <time.h>
+#include <vector>
+#include <math.h>
 
 #include <QApplication>
-#include <QMainWindow>
 
 typedef unsigned char BYTE;
 typedef unsigned short WORD;
@@ -18,6 +19,7 @@ typedef unsigned int DWORD;
 #include "cms_errcode.h"
 #include "qtplayer.h"
 #include "QueueBuf.h"
+#include "EventParser.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -27,11 +29,14 @@ extern "C"
 #include "libavutil/avutil.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/mem.h"
+#include "libavutil/hwcontext.h"
+#include "libavutil/opt.h"
 #include "libavformat/avio.h"
 #include "libavformat/avformat.h"
 #include "libavcodec/avcodec.h"
 #include "libswscale/swscale.h"
-#include "libavutil/hwcontext.h"
+#include "libavfilter/buffersink.h"
+#include "libavfilter/buffersrc.h"
 
 #ifdef __cplusplus
 }
@@ -47,6 +52,7 @@ using namespace SDS_Device::enums;
 #define H264_DATA_BUF_SIZE  (1024*1024)
 #define DISP_DATA_BUF_SIZE  (50*1024*1024)
 #define RGB_DATA_QUEUE_NUM  256
+#define COORDINATES_MAX_NUM 64
 
 typedef void (*EventHandleDef)(const char*);
 typedef struct
@@ -81,6 +87,8 @@ uint32_t counter = 0;
 struct timespec start;
 struct timespec end;
 
+std::vector<StruDefCoordinate> Coordinates;
+
 bool CheckRgbWrBuf(uint32_t rgb_size)
 {
     uint32_t wr_idx = QueueWrIdx;
@@ -110,7 +118,7 @@ bool CheckRgbWrBuf(uint32_t rgb_size)
     return true;
 }
 
-uint8_t * GetRgbWrBuf(uint32_t rgb_size)
+uint8_t *GetRgbWrBuf(uint32_t rgb_size)
 {
     uint32_t wr_idx = QueueWrIdx;
     uint32_t rd_idx = QueueRdIdx;
@@ -461,7 +469,118 @@ void YuvToRgb(AVCodecContext *pCodecCtx, AVFrame *pFrame)
 #endif
 }
 
-void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt)
+int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    char args[512];
+    char draw_desc[128];
+    int ret = 0;
+    const AVFilter *buffersrc  = avfilter_get_by_name("buffer");
+    const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    AVFilterGraph *filter_graph;
+    AVFilterContext *buffersink_ctx;
+    AVFilterContext *buffersrc_ctx;
+    AVRational time_base = dec_ctx->time_base;
+    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_NONE };
+
+    sprintf(draw_desc, "drawbox=x=%d:y=%d:w=%d:h=%d:color=yellow@1",
+            x, y, w, h);
+
+    do{
+        filter_graph = avfilter_graph_alloc();
+        if (!outputs || !inputs || !filter_graph) {
+            ret = AVERROR(ENOMEM);
+            break;
+        }
+
+        /* buffer video source: the decoded frames from the decoder will be inserted here. */
+        snprintf(args, sizeof(args),
+                 "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
+                 dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+                 time_base.num, time_base.den,
+                 dec_ctx->sample_aspect_ratio.num, dec_ctx->sample_aspect_ratio.den);
+
+        ret = avfilter_graph_create_filter(&buffersrc_ctx, buffersrc, "in",
+                                           args, NULL, filter_graph);
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+            break;
+        }
+
+        /* buffer video sink: to terminate the filter chain. */
+        ret = avfilter_graph_create_filter(&buffersink_ctx, buffersink, "out",
+                                           NULL, NULL, filter_graph);
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
+            break;
+        }
+
+        ret = av_opt_set_int_list(buffersink_ctx, "pix_fmts", pix_fmts,
+                                  AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+            break;
+        }
+
+        /*
+     * Set the endpoints for the filter graph. The filter_graph will
+     * be linked to the graph described by filters_descr.
+     */
+
+        /*
+     * The buffer source output must be connected to the input pad of
+     * the first filter described by filters_descr; since the first
+     * filter input label is not specified, it is set to "in" by
+     * default.
+     */
+        outputs->name       = av_strdup("in");
+        outputs->filter_ctx = buffersrc_ctx;
+        outputs->pad_idx    = 0;
+        outputs->next       = NULL;
+
+        /*
+     * The buffer sink input must be connected to the output pad of
+     * the last filter described by filters_descr; since the last
+     * filter output label is not specified, it is set to "out" by
+     * default.
+     */
+        inputs->name       = av_strdup("out");
+        inputs->filter_ctx = buffersink_ctx;
+        inputs->pad_idx    = 0;
+        inputs->next       = NULL;
+
+        if ((ret = avfilter_graph_parse_ptr(filter_graph, draw_desc,
+                                            &inputs, &outputs, NULL)) < 0)
+            break;
+
+        if ((ret = avfilter_graph_config(filter_graph, NULL)) < 0)
+            break;
+
+        /* push the decoded frame into the filtergraph */
+        if (av_buffersrc_add_frame_flags(buffersrc_ctx, frame, AV_BUFFERSRC_FLAG_KEEP_REF) < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Error while feeding the filtergraph\n");
+            break;
+        }
+
+        /* pull filtered frames from the filtergraph */
+        while (1) {
+            ret = av_buffersink_get_frame(buffersink_ctx, filt_frame);
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                break;
+            if (ret < 0)
+                break;
+        }
+    }while(0);
+
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    avfilter_graph_free(&filter_graph);
+
+    return ret;
+}
+
+void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPacket *pkt)
 {
     int ret;
 
@@ -480,8 +599,40 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt)
             fprintf(stderr, "Error during decoding\n");
             return;
         }
-//        SaveImageDataoFile(frame, "./test.jpg");
-        YuvToRgb(dec_ctx, frame);
+
+        //        switch (frame->pict_type) {
+        //        case AV_PICTURE_TYPE_I:
+        //            printf("i frame \n");
+        //            break;
+        //        case AV_PICTURE_TYPE_B:
+        //            printf("b frame \n");
+        //            break;
+        //        case AV_PICTURE_TYPE_P:
+        //            printf("p frame \n");
+        //            break;
+        //        default:
+        //            printf("other frame \n");
+        //            break;
+        //        }
+        printf("frame pts = 0x%lx \n", frame->best_effort_timestamp);
+        fflush(stdout);
+
+        if(Coordinates.size() > 0)
+        {
+            int32_t x = Coordinates[0].left_top_x;
+            int32_t y = Coordinates[0].left_top_y;
+            int32_t w = abs(x - Coordinates[0].right_bottom_x);
+            int32_t h = abs(y - Coordinates[0].right_bottom_y);
+            FiltersDraw(dec_ctx, frame, filt_frame, x, y, w, h);
+            Coordinates.erase(Coordinates.begin());
+            //            SaveImageDataoFile(filt_frame, "./test.jpg");
+            YuvToRgb(dec_ctx, filt_frame);
+        }
+        else
+        {
+            YuvToRgb(dec_ctx, frame);
+        }
+
     }
 }
 
@@ -491,6 +642,7 @@ int FrameDecode(void)
     AVCodecParserContext *parser = nullptr;
     AVCodecContext *c= nullptr;
     AVFrame *frame = nullptr;
+    AVFrame *filt_frame = nullptr;
     int ret = -1;
     AVPacket *pkt = nullptr;
     uint8_t *pDecBuf = nullptr;
@@ -554,8 +706,9 @@ int FrameDecode(void)
         }
 
         frame = av_frame_alloc();
-        if (!frame) {
-            fprintf(stderr, "Could not allocate video frame\n");
+        filt_frame = av_frame_alloc();
+        if (!frame || !filt_frame) {
+            fprintf(stderr, "Could not allocate video frame or filt frame\n");
             break;
         }
 
@@ -572,12 +725,12 @@ int FrameDecode(void)
 
             /* flush the decoder */
             if(pkt->size)
-                decode(c, frame, pkt);
+                decode(c, frame, filt_frame, pkt);
 
             pData += ret;
             decode_size -= ret;
         }
-        decode(c, frame, nullptr);
+        decode(c, frame, filt_frame, nullptr);
 
         if(decode_size == 0)
         {
@@ -589,6 +742,7 @@ int FrameDecode(void)
     if(parser) av_parser_close(parser);
     if(c) avcodec_free_context(&c);
     if(frame) av_frame_free(&frame);
+    if(filt_frame) av_frame_free(&filt_frame);
     if(pkt) av_packet_free(&pkt);
 
     return ret;
@@ -672,8 +826,8 @@ int CALLBACK EventHandle(long long llUserData, const char* strEvent, int event_t
 
 int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long llStamp, int type, int channel, long long llUserData)
 {
-//    printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
-//    fflush(stdout);
+    //    printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
+    //    fflush(stdout);
 #if 1
     switch (type)
     {
@@ -725,11 +879,46 @@ void EventDevRegisterHdl(const char *strEvent)
     is_dev_ready = true;
 }
 
+void EventAlarmInfoHdl(const char *strEvent)
+{
+    char device_id[32];
+    if(ParseDeviceId(strEvent, device_id) < 0) return;
+    printf("device id : %s \n", device_id);
+
+    int32_t event_type;
+    if(ParseEventType(strEvent, &event_type) < 0) return;
+    if(event_type != NETEVENT_NOTIFY) return;
+    printf("event type : %d \n", event_type);
+
+    int32_t alarm_type;
+    if(ParseAlarmType(strEvent, &alarm_type) < 0) return;
+    if(alarm_type != eAlarmTypeCustom) return;
+    printf("alarm type : %d \n", alarm_type);
+
+    int32_t sub_alarm_type;
+    if(ParseSubAlarmType(strEvent, &sub_alarm_type) < 0) return;
+    if(sub_alarm_type != eAlarmTypeHelmetDanger) return;
+    printf("sub alarm type : %d \n", sub_alarm_type);
+
+    StruDefCoordinate coordinates[COORDINATES_MAX_NUM];
+    uint32_t coordinates_nums = 0;
+    if(ParseCoordinates(strEvent, coordinates, &coordinates_nums) < 0) return;
+    for(uint32_t i = 0;i < coordinates_nums;i ++)
+    {
+        Coordinates.push_back(coordinates[i]);
+        if(Coordinates.size() > COORDINATES_MAX_NUM) Coordinates.erase(Coordinates.begin());
+        printf("coordinate[%d] : (%d, %d) (%d, %d) \n", i, coordinates[i].left_top_x, coordinates[i].left_top_y,
+               coordinates[i].right_bottom_x, coordinates[i].right_bottom_y);
+    }
+    fflush(stdout);
+}
+
 void EventHandleInit(void)
 {
     memset(EventHdl, 0 ,sizeof(EventHdl) / sizeof(EventHandleDef));
     EventHdl[NETEVENT_DEVICE_ONLINE] = EventDevOnlineHdl;
     EventHdl[NETEVENT_DEVICE_REGISTER] = EventDevRegisterHdl;
+    EventHdl[NETEVENT_NOTIFY] = EventAlarmInfoHdl;
 }
 
 void *main_proc(void *arg)
@@ -742,6 +931,13 @@ void *main_proc(void *arg)
             if(Ret != ERR_SUCCESS)
             {
                 printf("SDS_NetDevice_OpenStream errcode = 0x%x \n", Ret);
+                return nullptr;
+            }
+
+            Ret = SDS_NetDevice_GetAlarm("30013", true);
+            if(Ret != ERR_SUCCESS)
+            {
+                printf("SDS_NetDevice_GetAlarm errcode = 0x%x \n", Ret);
                 return nullptr;
             }
             is_dev_ready = false;

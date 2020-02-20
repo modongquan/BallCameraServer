@@ -13,23 +13,19 @@ his:
 
 namespace SDS_Device
 {	
-	namespace constants
-	{
-		
-	}
-
 	namespace enums
 	{
 		// note: this definition is the same as the DB table
-		typedef enum eNetworkType
+		typedef enum NetworkType_E_tag
 		{
-			eLocalAreaNetwork	= 1,
+			eWired				= 1,
 			e2G					= 2,
 			e3G					= 3,
 			e4G					= 4,
-			eWifi				= 5,
-			e5G					= 6
-		}eNetworkType;
+			e5G					= 5,
+			e6G					= 6,
+			eWifi				= 9
+		}NetworkType_E;
 
 		//媒体类型	//media type
 		typedef enum eMediaType
@@ -42,7 +38,6 @@ namespace SDS_Device
 			eAll_SNAP		= 6,		// snapped picture of all	//所有截图
 		}eMediaType;
 
-		// 通天星返回的媒体类型，和请求的不同，TTX搞反了
 		typedef enum eReturnMediaType
 		{
 			eRetAlertVideo	= 1,	// video of alert			//报警录像
@@ -67,17 +62,18 @@ namespace SDS_Device
 			ePtzActionFocusFar = 0x0c,			// focus far		// 聚焦远
 			ePtzActionIrisOpen = 0x0D,			// iris large		// 光圈扩大
 			ePtzActionIrisClose = 0x0E,			// iris small		// 光圈缩小	
-			ePtzActionRunCruise = 0x0F,			// run cruise		// 开始巡航
-			ePtzActionStopCruise = 0x10,		// stop cruise		// 停止巡航
-			ePtzActionSetPreset = 0x11,			// set preset		// 设置预置点 
-			ePtzActionClearPreset = 0x12,		// clear preset		// 清除预置点 
-			ePtzActionGotoPreset = 0x13,		// goto preset		// 转到预置点
-			ePtzActionLightOpen = 0x14,			// open light power	// 接通灯光电源
-			ePtzActionLightClose = 0x15,		// close light power// 关闭灯光电源
-			ePtzActionWiperOpen = 0x16,			// open wiper switch// 接通雨刷开关
-			ePtzActionWiperClose = 0x17,		// close wiper switch// 关闭雨刷开关
+			ePtzActionLightOpen = 0x0F,			// open light power	// 接通灯光电源
+			ePtzActionLightClose = 0x10,		// close light power// 关闭灯光电源
+			ePtzActionWiperOpen = 0x11,			// open wiper switch// 接通雨刷开关
+			ePtzActionWiperClose = 0x12,		// close wiper switch// 关闭雨刷开关
+			ePtzActionRunCruise = 0x13,			// run cruise		// 开始巡航
+			ePtzActionStopCruise = 0x63,		// stop cruise		// 停止巡航
+			ePtzActionSetPreset = 0x17,			// set preset		// 设置预置点 
+			ePtzActionClearPreset = 0x18,		// clear preset		// 清除预置点 
+			ePtzActionGotoPreset = 0x16,		// goto preset		// 转到预置点
 			ePtzActionStop = 0xFF,				// stop					//停止
 		}ePtzActionType;
+  
 
 		//设备控制类型
 		typedef enum eCtrlType
@@ -150,6 +146,17 @@ namespace SDS_Device
 			NETEVENT_COMMONPORT_CLOSE = 42,		// close port		// 关闭
 			NETEVENT_COMMONPORT_DATA = 43,		// port data	    // 串口数据
 			NETEVENT_DOWNLOADING_FILE = 44,		// downloading snap	// 抓拍、日志文件下载中
+			NETEVENT_AUDIO_COMM = 45,			// audio communication // 设备发起对讲
+			NETEVENT_FACE_ALARM_FILE = 46,		// face alarm picture
+			NETEVENT_SUBSCRIBE_FACE_ALARM = 47,	// face alarm GPS info 
+			NETEVENT_DEVICE_MEDIA_OFFLINE = 48,	// device media offline	// 设备媒体链路下线断开
+			NETEVENT_BOARDCAST_OPENING = 49,	// boardcast opening	// 广播正在打开
+			NETEVENT_BOARDCAST_OK = 50,			// open boardcast succ	// 广播打开成功
+			NETEVENT_BOARDCAST_ERROR = 51,		// open boardcast fail	// 广播打开失败
+			NETEVENT_BOARDCAST_CLOSE = 52,		// close boardcast		// 广播关闭
+			NETEVENT_LIGHT_ELEC_ALARM = 53,		// trigger device light electronic alarm // 触发设备的光电报警
+			NETEVENT_DEVICE_UPGRADE = 54		// device upgrade: start or in upgrading or closed
+
 		}eNetEvent;
 
 		//数据类型
@@ -193,15 +200,52 @@ namespace SDS_Device
 			eAlarmTypeAccOff = 0x12,				//AccOff	// ACC关闭报警
 			eAlarmTypeFileUpload = 0x13,			//FileUpload// 文件上传报警
 
+			eAlarmTypeUrgentButton = 0x14,			// zs: 补充，紧急按钮报警
 			eAlarmTypeLowSpeed = 0x15,				//low speed alert	// 低速报警
 			eAlarmTypeEfence = 0x16,				//efence alert	// 电子围栏报警
 			eAlarmTypeNightDrive = 0x17,			//night drive alert	// 夜间行车报警
 			eAlarmTypeParkingOuttime = 0x18,		//parking outtime alert	// 停车超时报警
 			eAlarmTypeFatigueDrive = 0x19,			//fatigue drive alert	// 疲劳驾驶报警
-			eAlarmTypeRapidAcceleration = 0x1A,		//rapid acceleration alert	// 急加速
-			eAlarmTypeRapidDeceleration = 0x1B,		//rapid deceleration alert	// 急减速
 
+			eAlarmTypeInOutArea = 0x1A,				//in out area 	// 出入区域报警
+			eAlarmTypeHelmetDanger = 0x1B,			//helmet illegal person alert 安全帽危险人员
+			eAlarmTypeFaceIllegal = 0x1C,           //face illegal person alert	人脸识别非法人员
+
+			//adas报警
+			eAlarmTypeAdasDriverAbnormal = 0x1D,	//driver abnormal	// 驾驶员异常
+			eAlarmTypeAdasLeaveDrivingSight = 0x1E,	//leave driving alert	// 离开驾驶视线（左顾右盼）
+			eAlarmTypeAdasYawn = 0x1F,				//yawn alert	// 打哈欠
+			eAlarmTypeAdasCall = 0x20,				//call alert	// 打电话（手机警示）
+			eAlarmTypeAdasNotWearSeatBelt = 0x21,	//not wear seat belt alert	// 不系安全带
+			eAlarmTypeAdasSmoking = 0x22,			//smoking alert	// 吸烟
+			eAlarmTypeAdasBlockCamera = 0x23,		//block camera alert	// 驾驶员遮挡摄像头
+			eAlarmTypeAdasDevFailure = 0x24,		//device failure alert	// 设备故障
+			eAlarmTypeAdasLaneOffset = 0x25,		//lane offset alert	// 车道偏移预警
+			eAlarmTypeAdasCloseCar = 0x26,			//close car alert	// 前车近距
+			eAlarmTypeAdasDangerCollisionCar = 0x27,//danger collision alert	// 前车碰撞危险（预警）
+			eAlarmTypeAdasVehicleRoll = 0x28,		//vehicle roll alert	// 车辆侧倾
+			eAlarmTypeAdasBraking = 0x29,			//braking alert		// 急刹车
+			eAlarmTypeAdasOutWork = 0x2A,			//out work alert			// 离岗
+			eAlarmTypeAdasRapidTurnLeft = 0x2B,		//rapid turn left alert		// 急左转弯
+			eAlarmTypeAdasRapidTurnRight = 0x2C,	//rapid turn right alert	// 急右转弯
+			eAlarmTypeAdasHeadDown = 0x2D,			//head down alert			// 低头
+			eAlarmTypeAdasOverSpeedWarning = 0x2E,	//overspeed warning alert	// 超速预警
+			eAlarmTypeAdasFaceWarning = 0x2F,		//face warning alert		// 面向报警
+			eAlarmTypeAdasFatigueOneLevel = 0x30,	//fatigue one level alert	// 疲劳一级
+			eAlarmTypeAdasFatigueTwoLevel = 0x31,	//fatigue two level alert	// 疲劳二级
+			eAlarmTypeAdasRapidAcceleration = 0x32,		//rapid acceleration alert	// 急加速
+			eAlarmTypeAdasRapidDeceleration = 0x33,		//rapid deceleration alert	// 急减速
+			eAlarmTypeAdasFaceRecognition = 0x34,		//face recognition alert	// 人脸识别抓拍报警
+
+			eAlarmTypeRfidDriverCard = 0x61,				//rfid	// rfid 司机刷卡报警
+			eAlarmTypeOBD = 0x62,							//obd	// obd 
+			eAlarmTypeInspectDone = 0x63,					//inspect done			// 巡检完成
+			eAlarmTypeInspectTimeOut = 0x64,				//inspect timeout		// 巡检超时 
+			eAlarmTypeHighTemperature = 0x65,				//high temperature		// 高温报警 
+			eAlarmTypePersonnelOverload = 0x66,				//Personnel overload	// 人员超载
+			
 		}eAlarmType;
+
 
 		typedef enum em_res_type
 		{
@@ -210,13 +254,22 @@ namespace SDS_Device
 			em_res_type_snap = 2,		// 抓拍
 			em_res_type_talk = 3,		// 对讲
 			em_res_type_downsnap = 4,	// 下载抓拍
-			em_res_type_query = 5,		// 查询
+			em_res_type_query_device = 5,		// 查询
 			em_res_type_replay = 6,		// 回放
 			em_res_type_upgrade = 7,	// 升级
-			em_res_type_download = 8,	// download video file or segment
-			em_res_type_undispatched_query = 9,		// query video file size
-			em_res_type_undispatched_download = 10,	// download video file or segment
-			em_res_type_undispatched_dl_file = 11	// download special file
+			em_res_type_download = 8,						// download video file or segment
+			em_res_type_undispatched_query = 9,				// query video file size
+			em_res_type_undispatched_download = 10,			// download video file or segment
+			em_res_type_undispatched_dl_file = 11,			// download special file
+			em_res_type_face_alert = 12,					// for face alert
+			em_res_type_biometric_alert = 13,				// for face pic alert
+			em_res_type_download_file = 14,					// for download common file
+			em_res_type_undispatched_sche_query = 15,		// query video file size for schedule
+			em_res_type_undispatched_sche_download = 16,	// download video file or segment
+			em_res_type_undispatched_sche_dl_file = 17,		// query video file size for schedule
+
+			em_res_type_query_server = 18,		// 查询存储服务器
+
 		}em_res_type;
 	}
 

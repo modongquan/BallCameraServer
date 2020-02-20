@@ -1,0 +1,4 @@
+#ifndef EVENTPARSER_H
+#define EVENTPARSER_H
+
+#endif // EVENTPARSER_H

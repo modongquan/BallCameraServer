@@ -17,11 +17,13 @@ DEFINES -= QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    ../src/EventParser.cpp \
     ../src/QueueBuf.cpp \
     ../src/main.cpp \
     ../src/qtplayer.cpp
 
 HEADERS += \
+    ../src/EventParser.h \
     ../src/QueueBuf.h \
     ../inc/cms_errcode.h \
     ../inc/SDS_Device_Api.h \
@@ -42,7 +44,9 @@ LIBS += \
     -lavcodec \
     -lavutil \
     -lswresample \
-    -lswscale
+    -lswscale \
+    -lpostproc \
+    -lavfilter
 
 INCLUDEPATH += \
     ../inc \
