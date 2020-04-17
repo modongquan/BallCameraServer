@@ -18,17 +18,23 @@ DEFINES -= QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     ../src/EventParser.cpp \
+    ../src/H264QueueBuf.cpp \
     ../src/QueueBuf.cpp \
     ../src/main.cpp \
-    ../src/qtplayer.cpp
+    ../src/qtplayer.cpp \
+    ../src/rtmpsrv.cpp \
+    ../src/thread.cpp
 
 HEADERS += \
     ../src/EventParser.h \
+    ../src/H264QueueBuf.h \
     ../src/QueueBuf.h \
     ../inc/cms_errcode.h \
     ../inc/SDS_Device_Api.h \
     ../inc/SDS_Device_DataDefine.h \
-    ../src/qtplayer.h
+    ../src/qtplayer.h \
+    ../src/rtmpsrv.h \
+    ../src/thread.h
 
 LIBS += \
     -L../lib \
@@ -46,7 +52,8 @@ LIBS += \
     -lswresample \
     -lswscale \
     -lpostproc \
-    -lavfilter
+    -lavfilter \
+    -lrtmp
 
 INCLUDEPATH += \
     ../inc \

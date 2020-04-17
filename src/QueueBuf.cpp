@@ -41,6 +41,7 @@ int32_t QueueBufInit(uint32_t buf_num)
 int32_t QueueBufRegister(uint8_t *buf, uint32_t size, uint32_t data_seg_num, uint32_t sub_seg_num)
 {
     if(buf == nullptr || size == 0 || (QueueBufIdx >= QueueBufNum)) return -1;
+    if(!data_seg_num || !sub_seg_num) return -1;
 
     uint32_t idx = QueueBufIdx;
 
@@ -107,7 +108,7 @@ int32_t CheckWrDataSeg(uint32_t idx, uint32_t wr_size)
             {
                 printf("skip the data to avoid data buffer overwrite \n");
                 fflush(stdout);
-                return false;
+                return -1;
             }
             continue;
         }
@@ -191,8 +192,11 @@ void InsertData(uint32_t idx, uint8_t *pData, uint32_t size)
     if(++sub_wr_idx >= pQueueBuf[idx].SubQueueSegNum) sub_wr_idx = 0;
     pQueueBuf[idx].pSubQueue[sub_wr_idx].pDataSeg = pWr;
     pQueueBuf[idx].SubSegWrIdx = sub_wr_idx;
-//    printf("insert data : (%p - %p) \n", pStart, pWr);
-//    fflush(stdout);
+//    if(idx == 0)
+//    {
+//        printf("insert data : (%p - %p) %d\n", pStart, pWr, size);
+//        fflush(stdout);
+//    }
 }
 
 void SetNextWrBuf(uint32_t idx)
@@ -223,8 +227,11 @@ void SetNextWrBuf(uint32_t idx)
     pQueueBuf[idx].SubSegWrIdx = 0;
     pQueueBuf[idx].pSubQueue[0].pDataSeg = pWrEnd;
 
-//    printf("wr data buf = (%p - %p) \n", pWrStart, pWrEnd);
-//    fflush(stdout);
+//    if(idx == 1)
+//    {
+//        printf("wr data buf = (%p - %p) \n", pWrStart, pWrEnd);
+//        fflush(stdout);
+//    }
 }
 
 uint32_t GetRdDataSize(uint32_t idx)
@@ -248,12 +255,6 @@ int32_t ReadData(uint32_t idx, uint8_t *pOut)
         return -1;
     }
 
-//    uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + pQueueBuf[idx].QueueDataSegNum - rd_idx);
-//    if(diff >= 2)
-//    {
-
-//    }
-
     if(pQueueBuf[idx].pQueueDataSeg[rd_idx].size == 0)
     {
         return -1;
@@ -272,8 +273,11 @@ int32_t ReadData(uint32_t idx, uint8_t *pOut)
         memcpy(pOut + cpy_size, pQueueBuf[idx].start, rd_size - cpy_size);
     }
 
-//    printf("rd data buf = (%p - %p) \n",static_cast<void *>(pData), pQueueBuf[idx].pQueueDataSeg[rd_idx + 1].pDataSeg);
-//    fflush(stdout);
+//    if(idx == 1)
+//    {
+//        printf("rd data buf = (%p - %p) \n",static_cast<void *>(pData), pQueueBuf[idx].pQueueDataSeg[rd_idx + 1].pDataSeg);
+//        fflush(stdout);
+//    }
 
     pQueueBuf[idx].pQueueDataSeg[rd_idx].pDataSeg = nullptr;
     pQueueBuf[idx].pQueueDataSeg[rd_idx].size = 0;

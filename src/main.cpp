@@ -7,6 +7,8 @@
 #include <time.h>
 #include <vector>
 #include <math.h>
+#include <inttypes.h>
+#include <sys/time.h>
 
 #include <QApplication>
 
@@ -20,6 +22,7 @@ typedef unsigned int DWORD;
 #include "qtplayer.h"
 #include "QueueBuf.h"
 #include "EventParser.h"
+#include "rtmpsrv.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -37,6 +40,7 @@ extern "C"
 #include "libswscale/swscale.h"
 #include "libavfilter/buffersink.h"
 #include "libavfilter/buffersrc.h"
+#include "libavutil/error.h"
 
 #ifdef __cplusplus
 }
@@ -46,11 +50,23 @@ using namespace  SDS_Device::sdk;
 using namespace sds::error;
 using namespace SDS_Device::enums;
 
+//#define HARDWARE_ENCODE_DEF
+
 #define EVENT_TYPE_NUM  (NETEVENT_DOWNLOADING_FILE + 1)
 #define DEVICE_ID_SIZE  32
 
-#define H264_DATA_BUF_SIZE  (1024*1024)
+#define H264_DATA_BUF_SIZE  (10*1024*1024)
+#define YUV_DATA_BUF_SIZE   (300*1024*1024)
 #define DISP_DATA_BUF_SIZE  (50*1024*1024)
+#define RTMP_DATA_BUF_SIZE  (1024*1024)
+
+#define READ_ONE_FRAME_SIZE (10*1024*1024)
+#define READ_ONE_GOP_SIZE   (1024*1024)
+#define READ_ONE_RTMP_SIZE  (200*1024)
+
+#define SPS_DATA_BUF_SIZE   256
+#define PPS_DATA_BUF_SIZE   256
+
 #define RGB_DATA_QUEUE_NUM  256
 #define COORDINATES_MAX_NUM 64
 
@@ -63,31 +79,67 @@ typedef struct
 
 EventHandleDef EventHdl[EVENT_TYPE_NUM];
 char DeviceId[DEVICE_ID_SIZE];
+uint32_t DevIdIndex = 0;
 bool is_dev_ready = false;
 _handle StreamHdl;
 
 uint8_t H264DataBuf[H264_DATA_BUF_SIZE];
 int32_t H264DataIdx = 0;
+uint8_t H264ReadBuf[READ_ONE_GOP_SIZE];
 bool is_first_iframe_recv = false;
 bool is_skip_frame = false;
 
+uint8_t YuvDataBuf[YUV_DATA_BUF_SIZE];
+int32_t YuvDataIdx = 0;
+uint8_t YuvBuf[READ_ONE_FRAME_SIZE];
+
+uint8_t RtmpDataBuf[RTMP_DATA_BUF_SIZE];
+uint32_t RtmpDataIdx = 0;
+uint8_t RtmpReadBuf[READ_ONE_RTMP_SIZE];
+
 QtPlayer *pVideoPlayer;
-uint32_t video_w = 0;
-uint32_t video_h = 0;
+int32_t video_w = 0;
+int32_t video_h = 0;
+int64_t encode_idx = 0;
 
 uint8_t DispDataBuf[DISP_DATA_BUF_SIZE];
 StruDefRgbData RgbDataQueue[RGB_DATA_QUEUE_NUM];
 volatile uint32_t QueueRdIdx = 0;
 volatile uint32_t QueueWrIdx = 0;
+uint8_t RgbBuf[READ_ONE_FRAME_SIZE];
+
+uint8_t SpsBuf[SPS_DATA_BUF_SIZE];
+volatile uint32_t SpsSize = 0;
+
+uint8_t PpsBuf[PPS_DATA_BUF_SIZE];
+volatile uint32_t PpsSize = 0;
+
+pthread_mutex_t video_param_mtx;
+bool is_key_frame = false;
 
 char test[32] = {"test_"};
 char jpg[32] = {".jpg"};
-uint32_t counter = 0;
 
-struct timespec start;
-struct timespec end;
+uint32_t gop_cnt = 0;
+struct timeval start_time, end_time;
 
 std::vector<StruDefCoordinate> Coordinates;
+
+AVCodecContext *pDecodecCtx;
+const AVCodec *pDecodec;
+AVCodecParserContext *pDecParserCtx;
+AVFrame *pDecFrame;
+AVFrame *pFiltFrame;
+AVPacket *pDecPkt;
+
+AVCodecContext *pEncodecCtx;
+const AVCodec *pEncodec;
+AVBufferRef *pHwDevCtx = nullptr;
+AVFrame *pEncFrame;
+#ifdef HARDWARE_ENCODE_DEF
+AVFrame *pEncHwFrame;
+#endif
+AVPacket *pEncPkt;
 
 bool CheckRgbWrBuf(uint32_t rgb_size)
 {
@@ -188,7 +240,69 @@ void SetNextRgbWrBuf(uint32_t rgb_size)
     //    fflush(stdout);
 }
 
-void SaveImageDataoFile(AVFrame *pFrame, const char *pFileOut)
+void PlayMp4File(const char *pFile)
+{
+    if(!pFile) return;
+
+    int32_t ret = 0;
+    int32_t video_idx = -1;
+    AVFormatContext *pFmtCtx;
+    AVCodecParameters *pCodecParam;
+    AVPacket av_pkt;
+
+    pFmtCtx = avformat_alloc_context();
+
+    ret = avformat_open_input(&pFmtCtx, pFile, nullptr, nullptr);
+    if(ret < 0)
+    {
+        printf("avformat_open_input %s fail\n", pFile);
+        fflush(stdout);
+        return;
+    }
+
+    if(avformat_find_stream_info(pFmtCtx, NULL) < 0)
+    {
+        printf("avformat_find_stream_info fail\n", pFile);
+        fflush(stdout);
+        return;
+    }
+
+    for(uint32_t i = 0;i < pFmtCtx->nb_streams;i ++)
+    {
+        if(pFmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+        {
+            video_idx = i;
+        }
+    }
+    if(video_idx < 0)
+    {
+        printf("did not find AVMEDIA_TYPE_VIDEO\n");
+        fflush(stdout);
+        return;
+    }
+
+    pCodecParam = pFmtCtx->streams[video_idx]->codecpar;
+    SpsSize = (((uint16_t)(pCodecParam->extradata[6]) << 8) | (pCodecParam->extradata[7]));
+    memcpy(SpsBuf, &(pCodecParam->extradata[8]), SpsSize);
+    uint32_t off = 6 + sizeof(uint16_t) + SpsSize + 1;
+    PpsSize = (((uint16_t)(pCodecParam->extradata[off]) << 8) | (pCodecParam->extradata[off + 1]));
+    memcpy(PpsBuf, &(pCodecParam->extradata[off + 2]), PpsSize);
+
+    while(av_read_frame(pFmtCtx, &av_pkt) >= 0)
+    {
+        if(av_pkt.stream_index == video_idx)
+        {
+            InsertData(RtmpDataIdx, (uint8_t *)&av_pkt.dts, sizeof(av_pkt.dts));
+            InsertData(RtmpDataIdx, av_pkt.data, av_pkt.size);
+            SetNextWrBuf(RtmpDataIdx);
+            av_packet_unref(&av_pkt);
+
+            usleep(40000);
+        }
+    }
+}
+
+void SaveImageDataToFile(AVFrame *pFrame, const char *pFileOut)
 {
     // printf("channel id = %d frame id = %d channel name = %s video type = %d image size = %d\n", VideoImage.video_image_info.channel_id,
     //        VideoImage.video_image_info.frame_id, VideoImage.video_image_info.channel_name, VideoImage.video_image_info.video_type,
@@ -232,7 +346,10 @@ void SaveImageDataoFile(AVFrame *pFrame, const char *pFileOut)
         pCodecCtx->height = pFrame->height;
         pCodecCtx->time_base.num = 1;
         pCodecCtx->time_base.den = 25;
-
+        if(pCodecCtx->pix_fmt == AV_PIX_FMT_YUV420P)
+        {
+            pCodecCtx->pix_fmt = AV_PIX_FMT_YUVJ420P;
+        }
         // Begin Output some information
         av_dump_format(pFormatCtx, 0, pFileOut, 1);
         // End Output some information
@@ -375,10 +492,377 @@ bool CreateBmp(const char *filename, uint8_t *pRGBBuffer, int32_t width, int32_t
     return true;
 }
 
-void YuvToRgb(AVCodecContext *pCodecCtx, AVFrame *pFrame)
+void GetVideoParam(uint8_t *pVideoData, uint32_t size)
 {
-#if 1
-    int image_size = av_image_get_buffer_size(AV_PIX_FMT_RGB32, pCodecCtx->width, pCodecCtx->height, 4);
+    if(pVideoData == nullptr) return;
+
+    uint32_t idx = 0;
+    uint8_t *pSPSData = nullptr;
+    uint32_t sps_size = 0;
+    uint8_t *pPPSData = nullptr;
+    uint32_t pps_size = 0;
+    uint8_t divide_sps_status = 0; /* 0:init 1:counting 2:over */
+    uint8_t divide_pps_status = 0; /* 0:init 1:counting 2:over */
+
+    while (idx < size)
+    {
+        uint32_t divide = *(uint32_t *)(pVideoData + idx);
+        if(divide != 0x01000000)
+        {
+            idx++;
+            if(divide_sps_status == 1) sps_size++;
+            else if(divide_pps_status == 1) pps_size++;
+            continue;
+        }
+        if(divide_sps_status == 1) divide_sps_status = 2;
+        else if(divide_pps_status == 1) divide_pps_status = 2;
+
+        idx += sizeof(uint32_t);
+        if((pVideoData[idx] & 0x1f) == 0x7)
+        {
+            pSPSData = (pVideoData + ++idx);
+            sps_size = 1;
+            divide_sps_status = 1;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x8)
+        {
+            pPPSData = (pVideoData + ++idx);
+            pps_size = 1;
+            divide_pps_status = 1;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x5)
+        {
+            is_key_frame = true;
+            break;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x1)
+        {
+            is_key_frame = false;
+            break;
+        }
+    }
+
+    pthread_mutex_lock(&video_param_mtx);
+    if(divide_pps_status == 2)
+    {
+        memcpy(PpsBuf, pPPSData, pps_size);
+        PpsSize = pps_size;
+
+    }
+    if(divide_sps_status == 2)
+    {
+        memcpy(SpsBuf, pSPSData, sps_size);
+        SpsSize = sps_size;
+    }
+    pthread_mutex_unlock(&video_param_mtx);
+}
+
+void GetVideoParamCb(uint8_t **pSpsBuf, uint32_t *pSpsSize, uint8_t **pPpsBuf, uint32_t *pPpsSize)
+{
+    if(!pSpsBuf || !pSpsSize || !pPpsBuf || !pPpsSize) return;
+
+    pthread_mutex_lock(&video_param_mtx);
+
+    *pPpsBuf = PpsBuf;
+    *pPpsSize = PpsSize;
+
+    *pSpsBuf = SpsBuf;
+    *pSpsSize = SpsSize;
+
+    pthread_mutex_unlock(&video_param_mtx);
+}
+
+void GetVideoDataCb(uint8_t **pDataBuf, uint32_t *pSize)
+{
+    if(!pDataBuf || !pSize) return;
+
+    uint32_t rd_size = GetRdDataSize(RtmpDataIdx);
+    if(rd_size > 0)
+    {
+        if(!ReadData(RtmpDataIdx, RtmpReadBuf))
+        {
+            *pDataBuf = RtmpReadBuf;
+            *pSize = rd_size;
+            return;
+        }
+    }
+
+    *pDataBuf = nullptr;
+    *pSize = 0;
+}
+
+int32_t EncodecInit(void)
+{
+#ifndef HARDWARE_ENCODE_DEF
+    pEncodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+#else
+    int err = av_hwdevice_ctx_create(&pHwDevCtx, AV_HWDEVICE_TYPE_VAAPI, nullptr, nullptr, 0);
+    if (err < 0) {
+        fprintf(stderr, "Failed to create a VAAPI device, err = %d\n", err);
+        fflush(stderr);
+        return -1;
+    }
+
+    pEncodec = avcodec_find_encoder_by_name("h264_vaapi");
+#endif
+    if (!pEncodec) {
+        fprintf(stderr, "avcodec find encoder err\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pEncodecCtx = avcodec_alloc_context3(pEncodec);
+    if (!pEncodecCtx) {
+        fprintf(stderr, "Could not allocate video codec context\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pEncFrame = av_frame_alloc();
+    if(!pEncFrame)
+    {
+        fprintf(stderr, "av_frame_alloc err\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pEncPkt = av_packet_alloc();
+    if(!pEncPkt)
+    {
+        fprintf(stderr, "av_packet_alloc err\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    return 0;
+}
+
+void EncodecDeInit(void)
+{
+    avcodec_free_context(&pEncodecCtx);
+    av_frame_free(&pEncFrame);
+#ifdef HARDWARE_ENCODE_DEF
+    av_buffer_unref(&pHwDevCtx);
+#endif
+    av_packet_free(&pEncPkt);
+}
+
+int set_hwframe_ctx(AVCodecContext *ctx, AVBufferRef *hw_device_ctx)
+{
+    AVBufferRef *hw_frames_ref;
+    AVHWFramesContext *frames_ctx = nullptr;
+    int err = 0;
+
+    if (!(hw_frames_ref = av_hwframe_ctx_alloc(hw_device_ctx))) {
+        fprintf(stderr, "Failed to create VAAPI frame context.\n");
+        fflush(stderr);
+        return -1;
+    }
+    frames_ctx = (AVHWFramesContext *)(hw_frames_ref->data);
+    frames_ctx->format    = AV_PIX_FMT_VAAPI;
+    frames_ctx->sw_format = ctx->pix_fmt;
+    frames_ctx->width     = ctx->width;
+    frames_ctx->height    = ctx->height;
+    frames_ctx->initial_pool_size = ctx->gop_size;
+    if ((err = av_hwframe_ctx_init(hw_frames_ref)) < 0) {
+        fprintf(stderr, "Failed to initialize VAAPI frame context.\n");
+        fflush(stderr);
+        av_buffer_unref(&hw_frames_ref);
+        return err;
+    }
+    ctx->hw_frames_ctx = av_buffer_ref(hw_frames_ref);
+    if (!ctx->hw_frames_ctx)
+        err = AVERROR(ENOMEM);
+
+    av_buffer_unref(&hw_frames_ref);
+    return err;
+}
+
+int32_t EncodecStart(void)
+{
+    int32_t ret;
+
+    pEncodecCtx->codec_id = AV_CODEC_ID_H264;
+    pEncodecCtx->codec_type = AVMEDIA_TYPE_VIDEO;
+
+    /* put sample parameters */
+    pEncodecCtx->bit_rate = 2*1024*1024;
+    /* resolution must be a multiple of two */
+    pEncodecCtx->width = pDecodecCtx->width;
+    pEncodecCtx->height = pDecodecCtx->height;
+    /* frames per second */
+    pEncodecCtx->time_base = pDecodecCtx->time_base;
+    pEncodecCtx->framerate = pDecodecCtx->framerate;
+
+    /* emit one intra frame every ten frames
+     * check frame pict_type before passing frame
+     * to encoder, if frame->pict_type is AV_PICTURE_TYPE_I
+     * then gop_size is ignored and the output of encoder
+     * will always be I frame irrespective to gop_size
+     */
+    pEncodecCtx->gop_size = pDecodecCtx->gop_size;
+    pEncodecCtx->max_b_frames = pDecodecCtx->max_b_frames;
+    pEncodecCtx->pix_fmt = pDecodecCtx->pix_fmt;
+
+    //    pEncodecCtx->qmax = 51;
+    //    pEncodecCtx->qmin = 11;
+    //    pEncodecCtx->slices = 4;
+
+#ifndef HARDWARE_ENCODE_DEF
+    if (pEncodec->id == AV_CODEC_ID_H264)
+    {
+        /*preset参数，画质从差到好（编解码工作量从低到高），分别是：ultrafast、superfast、veryfast、faster、fast、
+         * medium、slow、slower、veryslow、placebo（有的版本是不能用的，自己查支持哪些参数*/
+        av_opt_set(pEncodecCtx->priv_data, "preset", "slow", 0);
+    }
+#else
+    int err;
+
+    /* set hw_frames_ctx for encoder's AVCodecContext */
+    if (set_hwframe_ctx(pEncodecCtx, pHwDevCtx) < 0) {
+        fprintf(stderr, "Failed to set hwframe context.\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    if (!(pEncHwFrame = av_frame_alloc())) {
+        err = AVERROR(ENOMEM);
+        fprintf(stderr, "alloc hardware frame err\n");
+        fflush(stderr);
+        return -1;
+    }
+    if ((err = av_hwframe_get_buffer(pEncodecCtx->hw_frames_ctx, pEncHwFrame, 0)) < 0) {
+        fprintf(stderr, "av_hwframe_get_buffer");
+        fflush(stderr);
+        return -1;
+    }
+    if (!pEncHwFrame->hw_frames_ctx) {
+        err = AVERROR(ENOMEM);
+        fprintf(stderr, "hardware frame\n");
+        fflush(stderr);
+        return -1;
+    }
+#endif
+
+    /* open it */
+    ret = avcodec_open2(pEncodecCtx, pEncodec, NULL);
+    if (ret < 0) {
+        fprintf(stderr, "%s : Could not open codec\n", __FUNCTION__);
+        fflush(stderr);
+        return -1;
+    }
+
+    int32_t y_size = pEncodecCtx->width * pEncodecCtx->height;
+
+    av_image_fill_arrays(pEncFrame->data, pEncFrame->linesize, YuvBuf, pEncodecCtx->pix_fmt, pEncodecCtx->width, pEncodecCtx->height, 32);
+    pEncFrame->data[0] = YuvBuf;
+    pEncFrame->data[1] = YuvBuf + y_size;
+    pEncFrame->data[2] = YuvBuf + y_size * 5 / 4;
+    pEncFrame->format = pEncodecCtx->pix_fmt;
+    pEncFrame->width = pEncodecCtx->width;
+    pEncFrame->height = pEncodecCtx->height;
+
+    return 0;
+}
+
+void EncodecStop(void)
+{
+    avcodec_close(pEncodecCtx);
+    av_frame_unref(pEncFrame);
+#ifdef HARDWARE_ENCODE_DEF
+    av_frame_free(&pEncHwFrame);
+#endif
+}
+
+void Encode(AVCodecContext *enc_ctx, AVFrame *frame, AVPacket *pkt)
+{
+    int ret;
+
+    /* send the frame to the encoder */
+    //    if (frame)
+    //    {
+    //        printf("Send frame %3" PRId64"\n", frame->pts);
+    //        fflush(stdout);
+    //    }
+
+    if(frame) frame->pts = encode_idx++;
+
+    ret = avcodec_send_frame(enc_ctx, frame);
+    if (ret < 0) {
+        fprintf(stderr, "Error sending a frame for encoding\n");
+        fflush(stdout);
+        return;
+    }
+
+    while (ret >= 0) {
+        ret = avcodec_receive_packet(enc_ctx, pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
+        else if (ret < 0) {
+            fprintf(stderr, "Error during encoding\n");
+            fflush(stdout);
+            return;
+        }
+        InsertData(RtmpDataIdx, (uint8_t *)&pkt->dts, sizeof(pkt->dts));
+        InsertData(RtmpDataIdx, pkt->data, pkt->size);
+        SetNextWrBuf(RtmpDataIdx);
+
+        av_packet_unref(pkt);
+        //                printf("Write packet %3" PRId64" (size=%5d)\n", pkt->pts, pkt->size);
+        //                fflush(stdout);
+    }
+}
+
+void FrameEncode(void)
+{
+    uint32_t rd_size = GetRdDataSize(YuvDataIdx);
+    if(rd_size == 0) return;
+
+    int32_t enc_counter = 0;
+    struct timeval start_time, end_time;
+
+    gettimeofday(&start_time, nullptr);
+    EncodecStart();
+    while(1)
+    {
+        if(ReadData(YuvDataIdx, YuvBuf))
+        {
+            usleep(10000);
+            continue;
+        }
+#ifdef HARDWARE_ENCODE_DEF
+        int err;
+
+        if ((err = av_hwframe_transfer_data(pEncHwFrame, pEncFrame, 0)) < 0)
+        {
+            fprintf(stderr, "Error while transferring frame data to surface\n");
+            fflush(stderr);
+            enc_counter = pDecodecCtx->gop_size;
+        }
+        Encode(pEncodecCtx, pEncHwFrame, pEncPkt);
+#else
+        Encode(pEncodecCtx, pEncFrame, pEncPkt);
+#endif
+        //        SaveImageDataToFile(pEncFrame, "./test2.jpg");
+
+        enc_counter++;
+        if(enc_counter >= pDecodecCtx->gop_size)
+        {
+            /*after encode one gop frame and flush out the cache data, must reopen encoder*/
+            Encode(pEncodecCtx, nullptr, pEncPkt);
+            break;
+        }
+    }
+    EncodecStop();
+    gettimeofday(&end_time, nullptr);
+    printf("encode time = %ld\n", end_time.tv_sec*1000+end_time.tv_usec/1000-(start_time.tv_sec*1000+start_time.tv_usec/1000));
+}
+
+void YuvToRgb(void)
+{
+    enum AVPixelFormat rgb_fmt = AV_PIX_FMT_RGB32;
+    enum AVPixelFormat yuv_fmt = AV_PIX_FMT_YUV420P;
+    int image_size = av_image_get_buffer_size(rgb_fmt, video_w, video_h, 4);
     if(image_size <= 0) return;
 
     uint32_t rgb_size = static_cast<uint32_t>(image_size);
@@ -386,12 +870,12 @@ void YuvToRgb(AVCodecContext *pCodecCtx, AVFrame *pFrame)
 
     struct SwsContext *pSwsCtx = nullptr;
     AVFrame *pRgbFrame = nullptr;
-    uint8_t *pRgbBuf = nullptr;
+    AVFrame *pYuvFrame = nullptr;
 
-    do
+    while(!ReadData(YuvDataIdx, YuvBuf))
     {
-        pSwsCtx = sws_getCachedContext(nullptr, pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_YUV420P,
-                                       pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_RGB32, SWS_BICUBIC,
+        pSwsCtx = sws_getCachedContext(nullptr, video_w, video_h, yuv_fmt,
+                                       video_w, video_h, rgb_fmt, SWS_BICUBIC,
                                        nullptr, nullptr, nullptr);
         if(pSwsCtx == nullptr)
         {
@@ -402,71 +886,36 @@ void YuvToRgb(AVCodecContext *pCodecCtx, AVFrame *pFrame)
 
         pRgbFrame = av_frame_alloc();
         if(pRgbFrame == nullptr) break;
-        pRgbBuf = (uint8_t *)av_malloc(rgb_size);
-        if(pRgbBuf == nullptr) break;
+        pYuvFrame = av_frame_alloc();
+        if(pYuvFrame == nullptr) break;
 
-        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, pRgbBuf, AV_PIX_FMT_RGB32, pCodecCtx->width, pCodecCtx->height, 4);
-        pRgbFrame->format = AV_PIX_FMT_RGB32;
-        sws_scale(pSwsCtx, pFrame->data, pFrame->linesize, 0, pCodecCtx->height, pRgbFrame->data, pRgbFrame->linesize);
+        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, video_w, video_h, 4);
+        pRgbFrame->format = rgb_fmt;
 
-        InsertRgb(pRgbBuf, rgb_size, 0);
+        int32_t y_size = video_w * video_h;
+        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, video_w, video_h, 4);
+        pYuvFrame->data[0] = YuvBuf;
+        pYuvFrame->data[1] = YuvBuf + y_size;
+        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
+        pYuvFrame->format = yuv_fmt;
+        pYuvFrame->width = video_w;
+        pYuvFrame->height = video_h;
+        //        SaveImageDataToFile(pYuvFrame, "./test2.jpg");
+
+        sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, video_h, pRgbFrame->data, pRgbFrame->linesize);
+
+        InsertRgb(pRgbFrame->data[0], rgb_size, 0);
 
         SetNextRgbWrBuf(rgb_size);
-        video_w = pFrame->width;
-        video_h = pFrame->height;
-    }while(0);
+    }
 
     //    char file_name[128];
     //    snprintf(file_name, 128, "%s%d%s", test, counter++, ".bmp");
     //    CreateBmp(file_name, pRgbFrame->data[0], pFrame->width, pFrame->height, 32);
 
-    if(pRgbBuf) av_free(pRgbBuf);
-    if(pRgbFrame) av_frame_free(&pRgbFrame);
+    av_frame_free(&pYuvFrame);
+    av_frame_free(&pRgbFrame);
     if(pSwsCtx) sws_freeContext(pSwsCtx);
-#else
-    /*R = Y + 1.402 * (V - 128)
-      G = Y - 0.34414 * (U - 128) - 0.71414 * (V - 128)
-      B = Y + 1.772 * (U - 128)*/
-
-    int frame_size = pFrame->width * pFrame->height * 4;
-    if(frame_size <= 0) return;
-
-    if(!CheckRgbWrBuf(static_cast<uint32_t>(frame_size))) return;
-
-    uint8_t *pYData = pFrame->data[0];
-    uint8_t *pUData = pFrame->data[1];
-    uint8_t *pVData = pFrame->data[2];
-    int yIdx, vIdx, uIdx, rgbIdx;
-    int rgb[4];
-
-    for (int i = 0;i < pCodecCtx->height;i++)
-    {
-        for (int j = 0;j < pCodecCtx->width;j++)
-        {
-            yIdx = i * pCodecCtx->width + j;
-            vIdx = (i/2) * (pCodecCtx->width/2) + (j/2);
-            uIdx = vIdx;
-
-            rgb[0] = 128;
-            rgb[1] = static_cast<int>(pYData[yIdx] + 1.370705 * (pVData[uIdx] - 128));
-            rgb[2] = static_cast<int>(pYData[yIdx] - 0.698001 * (pUData[uIdx] - 128) - 0.703125 * (pVData[vIdx] - 128));
-            rgb[3] = static_cast<int>(pYData[yIdx] + 1.732446 * (pUData[vIdx] - 128));
-
-            for (int k = 0;k < 4;k++)
-            {
-                rgbIdx = (i * pCodecCtx->width + j) * 4 + k;
-                if(rgb[k] >= 0 && rgb[k] <= 255)
-                    PushRgb(static_cast<uint8_t>(rgb[k]), static_cast<uint32_t>(rgbIdx));
-                else
-                    PushRgb((rgb[k] < 0)?0:255, static_cast<uint32_t>(rgbIdx));
-            }
-        }
-    }
-    SetNextRgbWrBuf(frame_size);
-    video_w = pFrame->width;
-    video_h = pFrame->height;
-
-#endif
 }
 
 int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, int32_t x, int32_t y, int32_t w, int32_t h)
@@ -580,6 +1029,24 @@ int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, in
     return ret;
 }
 
+void SendFrameToYuvProc(AVFrame *frame)
+{
+    enum AVPixelFormat fmt = (enum AVPixelFormat)frame->format;
+
+    int32_t yuv_size = av_image_get_buffer_size(fmt, frame->width, frame->height, 4);
+    int32_t y_size = frame->width * frame->height;
+    int32_t u_size = y_size / 4;
+    int32_t v_size = u_size;
+    if(CheckWrDataSeg(YuvDataIdx, yuv_size) < 0) return;
+
+    //            SaveImageDataToFile(frame, "./test1.jpg");
+    InsertData(YuvDataIdx, frame->data[0], y_size);
+    InsertData(YuvDataIdx, frame->data[1], u_size);
+    InsertData(YuvDataIdx, frame->data[2], v_size);
+
+    SetNextWrBuf(YuvDataIdx);
+}
+
 void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPacket *pkt)
 {
     int ret;
@@ -587,6 +1054,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
     ret = avcodec_send_packet(dec_ctx, pkt);
     if (ret < 0) {
         fprintf(stderr, "Error sending a packet for decoding\n");
+        fflush(stderr);
         return;
     }
 
@@ -597,6 +1065,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
             return;
         else if (ret < 0) {
             fprintf(stderr, "Error during decoding\n");
+            fflush(stderr);
             return;
         }
 
@@ -614,8 +1083,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
         //            printf("other frame \n");
         //            break;
         //        }
-        printf("frame pts = 0x%lx \n", frame->best_effort_timestamp);
-        fflush(stdout);
+
 
         if(Coordinates.size() > 0)
         {
@@ -625,42 +1093,182 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
             int32_t h = abs(y - Coordinates[0].right_bottom_y);
             FiltersDraw(dec_ctx, frame, filt_frame, x, y, w, h);
             Coordinates.erase(Coordinates.begin());
-            //            SaveImageDataoFile(filt_frame, "./test.jpg");
-            YuvToRgb(dec_ctx, filt_frame);
+
+            SendFrameToYuvProc(filt_frame);
         }
         else
         {
-            YuvToRgb(dec_ctx, frame);
+            SendFrameToYuvProc(frame);
         }
-
+        video_w = dec_ctx->width;
+        video_h = dec_ctx->height;
     }
+}
+
+void decode2(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt)
+{
+    int ret;
+
+    ret = avcodec_send_packet(dec_ctx, pkt);
+    if (ret < 0) {
+        fprintf(stderr, "Error sending a packet for decoding\n");
+        fflush(stderr);
+        return;
+    }
+
+    while(ret >= 0)
+    {
+        ret = avcodec_receive_frame(dec_ctx, frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
+        else if (ret < 0) {
+            fprintf(stderr, "Error during decoding\n");
+            fflush(stderr);
+            return;
+        }
+        SaveImageDataToFile(frame, "./test1.jpg");
+
+        //        switch (frame->pict_type) {
+        //        case AV_PICTURE_TYPE_I:
+        //            printf("i frame \n");
+        //            break;
+        //        case AV_PICTURE_TYPE_B:
+        //            printf("b frame \n");
+        //            break;
+        //        case AV_PICTURE_TYPE_P:
+        //            printf("p frame \n");
+        //            break;
+        //        default:
+        //            printf("other frame \n");
+        //            break;
+        //        }
+    }
+}
+
+int32_t FrameBsf(AVCodecContext *codec, AVPacket *pkt)
+{
+    AVBSFContext *pBsfCtx;
+    const AVBitStreamFilter *pBsf;
+    AVCodecParameters *pCodecParam;
+
+    pBsf = av_bsf_get_by_name("h264_mp4toannexb");
+
+    if(av_bsf_alloc(pBsf, &pBsfCtx) < 0)
+    {
+        printf("av_bsf_alloc err \n");
+        fflush(stdout);
+        return -1;
+    }
+
+    pCodecParam = avcodec_parameters_alloc();
+    avcodec_parameters_from_context(pBsfCtx->par_in, codec);
+
+    if(av_bsf_init(pBsfCtx) < 0)
+    {
+        printf("av_bsf_init err \n");
+        fflush(stdout);
+        return -1;
+    }
+
+    if(av_bsf_send_packet(pBsfCtx, pkt) < 0)
+    {
+        printf("av_bsf_send_packet err \n");
+        fflush(stdout);
+    }
+
+    while (av_bsf_receive_packet(pBsfCtx, pkt) == 0) {
+        av_packet_unref(pkt);
+    }
+
+    avcodec_parameters_free(&pCodecParam);
+    av_bsf_free(&pBsfCtx);
+
+    return 0;
+}
+
+int32_t FrameDecodeInit(void)
+{
+    /* find the MPEG-1 video decoder */
+    pDecodec = avcodec_find_decoder(AV_CODEC_ID_H264);
+    if (!pDecodec) {
+        fprintf(stderr, "Codec not found\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pDecParserCtx = av_parser_init(pDecodec->id);
+    if (!pDecParserCtx) {
+        fprintf(stderr, "parser not found\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pDecodecCtx = avcodec_alloc_context3(pDecodec);
+    if (!pDecodecCtx) {
+        fprintf(stderr, "Could not allocate video codec context\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pDecFrame = av_frame_alloc();
+    pFiltFrame = av_frame_alloc();
+    if (!pDecFrame || !pFiltFrame) {
+        fprintf(stderr, "Could not allocate video frame or filt frame\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    pDecPkt = av_packet_alloc();
+    if (!pDecPkt){
+        fflush(stderr);
+        return -1;
+    }
+
+    return 0;
+}
+
+void FrameDecodeDeInit(void)
+{
+    av_parser_close(pDecParserCtx);
+    avcodec_free_context(&pDecodecCtx);
+    av_frame_free(&pDecFrame);
+    av_frame_free(&pFiltFrame);
+    av_packet_free(&pDecPkt);
+}
+
+int32_t FrameDecodeStart(void)
+{
+    /* For some codecs, such as msmpeg4 and mpeg4, width and height
+   MUST be initialized there because this information is not
+   available in the bitstream. */
+
+    /* open it */
+    if (avcodec_open2(pDecodecCtx, pDecodec, nullptr) < 0) {
+        fprintf(stderr, "Could not open codec\n");
+        fflush(stderr);
+        return -1;
+    }
+
+    return 0;
+}
+
+void FrameDecodeStop(void)
+{
+    avcodec_close(pDecodecCtx);
 }
 
 int FrameDecode(void)
 {
-    const AVCodec *codec = nullptr;
-    AVCodecParserContext *parser = nullptr;
-    AVCodecContext *c= nullptr;
-    AVFrame *frame = nullptr;
-    AVFrame *filt_frame = nullptr;
-    int ret = -1;
-    AVPacket *pkt = nullptr;
-    uint8_t *pDecBuf = nullptr;
+    uint8_t *pDecBuf = H264ReadBuf;
     uint32_t decode_size;
+    int32_t ret;
+    struct timeval start_time, end_time;
 
     do{
         decode_size = GetRdDataSize(H264DataIdx);
         if(decode_size == 0)
         {
             fprintf(stderr, "%s : get decode data size is zero \n", __FUNCTION__);
-            fflush(stderr);
-            break;
-        }
-
-        pDecBuf = (uint8_t *)av_malloc(decode_size);
-        if(pDecBuf == nullptr)
-        {
-            fprintf(stderr, "%s : molloc fail for decode data \n", __FUNCTION__);
             fflush(stderr);
             break;
         }
@@ -672,51 +1280,14 @@ int FrameDecode(void)
             break;
         }
 
-        pkt = av_packet_alloc();
-        if (!pkt)
-            break;
-
-        /* find the MPEG-1 video decoder */
-        codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-        if (!codec) {
-            fprintf(stderr, "Codec not found\n");
-            break;
-        }
-
-        parser = av_parser_init(codec->id);
-        if (!parser) {
-            fprintf(stderr, "parser not found\n");
-            break;
-        }
-
-        c = avcodec_alloc_context3(codec);
-        if (!c) {
-            fprintf(stderr, "Could not allocate video codec context\n");
-            break;
-        }
-
-        /* For some codecs, such as msmpeg4 and mpeg4, width and height
-       MUST be initialized there because this information is not
-       available in the bitstream. */
-
-        /* open it */
-        if (avcodec_open2(c, codec, nullptr) < 0) {
-            fprintf(stderr, "Could not open codec\n");
-            break;
-        }
-
-        frame = av_frame_alloc();
-        filt_frame = av_frame_alloc();
-        if (!frame || !filt_frame) {
-            fprintf(stderr, "Could not allocate video frame or filt frame\n");
-            break;
-        }
+        gettimeofday(&start_time, nullptr);
+        FrameDecodeStart();
 
         /* use the parser to split the data into frames */
         uint8_t *pData = pDecBuf;
         while(decode_size > 0)
         {
-            ret = av_parser_parse2(parser, c, &pkt->data, &pkt->size,
+            ret = av_parser_parse2(pDecParserCtx, pDecodecCtx, &pDecPkt->data, &pDecPkt->size,
                                    pData, decode_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
             if (ret < 0) {
                 fprintf(stderr, "Error while parsing\n");
@@ -724,13 +1295,197 @@ int FrameDecode(void)
             }
 
             /* flush the decoder */
-            if(pkt->size)
-                decode(c, frame, filt_frame, pkt);
+            if(pDecPkt->size)
+            {
+                //                FrameBsf(pDecodecCtx, pDecPkt);
+                decode(pDecodecCtx, pDecFrame, pFiltFrame, pDecPkt);
+            }
 
             pData += ret;
             decode_size -= ret;
         }
-        decode(c, frame, filt_frame, nullptr);
+        decode(pDecodecCtx, pDecFrame, pFiltFrame, nullptr);
+
+        if(decode_size == 0)
+        {
+            ret = 0;
+        }
+    }while(0);
+    gettimeofday(&end_time, nullptr);
+    printf("decode time = %ld\n", end_time.tv_sec*1000+end_time.tv_usec/1000-start_time.tv_sec*1000-start_time.tv_usec/1000);
+
+    FrameDecodeStop();
+    av_frame_unref(pDecFrame);
+    av_packet_unref(pDecPkt);
+
+    return ret;
+}
+
+bool JudgeKeyFrame(uint8_t *pVideoData, uint32_t size)
+{
+    if(pVideoData == nullptr) return false;
+
+    uint32_t idx = 0;
+    uint8_t *pSPSData = nullptr;
+    uint32_t sps_size = 0;
+    uint8_t *pPPSData = nullptr;
+    uint32_t pps_size = 0;
+    uint8_t divide_sps_status = 0; /* 0:init 1:counting 2:over */
+    uint8_t divide_pps_status = 0; /* 0:init 1:counting 2:over */
+
+    while (idx < size)
+    {
+        uint32_t divide1 = *(uint32_t *)(pVideoData + idx);
+        uint32_t divide2 = (divide1 & 0x00ffffff);
+
+        if(divide1 != 0x01000000 && divide2 != 0x00010000)
+        {
+            idx++;
+            if(divide_sps_status == 1) sps_size++;
+            else if(divide_pps_status == 1) pps_size++;
+            continue;
+        }
+        if(divide_sps_status == 1)
+        {
+            divide_sps_status = 2;
+        }
+        else if(divide_pps_status == 1)
+        {
+            divide_pps_status = 2;
+        }
+
+        if(divide1 == 0x01000000) idx += sizeof(uint32_t);
+        else if(divide2 == 0x00010000) idx += 3;
+
+        if((pVideoData[idx] & 0x1f) == 0x7)
+        {
+            pSPSData = (pVideoData + idx++);
+            sps_size = 1;
+            divide_sps_status = 1;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x8)
+        {
+            pPPSData = (pVideoData + idx++);
+            pps_size = 1;
+            divide_pps_status = 1;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x5)
+        {
+            return true;
+        }
+        else if((pVideoData[idx] & 0x1f) == 0x1)
+        {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+uint8_t testBuf[RTMP_DATA_BUF_SIZE];
+int FrameDecode2(void)
+{
+    AVCodecContext *pDecodecCtx = nullptr;
+    const AVCodec *pDecodec = nullptr;
+    AVCodecParserContext *pDecParserCtx = nullptr;
+    AVFrame *pDecFrame = nullptr;
+    AVPacket *pDecPkt = nullptr;
+
+    static uint32_t off = 0;
+    uint8_t *pDecBuf = RtmpDataBuf + off;
+    uint32_t decode_size;
+    int32_t ret;
+
+    do{
+        decode_size = GetRdDataSize(RtmpDataIdx);
+        if(decode_size == 0)
+        {
+            fprintf(stderr, "%s : get decode data size is zero \n", __FUNCTION__);
+            fflush(stderr);
+            break;
+        }
+
+        if(ReadData(RtmpDataIdx, pDecBuf) < 0)
+        {
+            fprintf(stderr, "%s : read data fail to decode \n", __FUNCTION__);
+            fflush(stderr);
+            break;
+        }
+
+        if(JudgeKeyFrame(pDecBuf, decode_size))
+        {
+            memcpy(testBuf, pDecBuf, decode_size);
+            off = decode_size;
+            continue;
+        }
+        else
+        {
+            memcpy(testBuf + off, pDecBuf, decode_size);
+        }
+
+        /* find the MPEG-1 video decoder */
+        pDecodec = avcodec_find_decoder(AV_CODEC_ID_H264);
+        if (!pDecodec) {
+            fprintf(stderr, "Codec not found\n");
+            fflush(stderr);
+            return -1;
+        }
+
+        pDecParserCtx = av_parser_init(pDecodec->id);
+        if (!pDecParserCtx) {
+            fprintf(stderr, "parser not found\n");
+            fflush(stderr);
+            return -1;
+        }
+
+        pDecodecCtx = avcodec_alloc_context3(pDecodec);
+        if (!pDecodecCtx) {
+            fprintf(stderr, "Could not allocate video codec context\n");
+            fflush(stderr);
+            return -1;
+        }
+
+        pDecFrame = av_frame_alloc();
+        if (!pDecFrame) {
+            fprintf(stderr, "Could not allocate video frame or filt frame\n");
+            fflush(stderr);
+            return -1;
+        }
+
+        pDecPkt = av_packet_alloc();
+        if (!pDecPkt){
+            fflush(stderr);
+            return -1;
+        }
+
+        if (avcodec_open2(pDecodecCtx, pDecodec, nullptr) < 0) {
+            fprintf(stderr, "Could not open codec\n");
+            fflush(stderr);
+            return -1;
+        }
+
+        /* use the parser to split the data into frames */
+        uint8_t *pData = testBuf;
+        while(decode_size > 0)
+        {
+            ret = av_parser_parse2(pDecParserCtx, pDecodecCtx, &pDecPkt->data, &pDecPkt->size,
+                                   pData, off + decode_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
+            if (ret < 0) {
+                fprintf(stderr, "Error while parsing\n");
+                break;
+            }
+
+            /* flush the decoder */
+            if(pDecPkt->size)
+            {
+                //                FrameBsf(pDecodecCtx, pDecPkt);
+                decode2(pDecodecCtx, pDecFrame, pDecPkt);
+            }
+
+            pData += ret;
+            decode_size -= ret;
+        }
+        decode2(pDecodecCtx, pDecFrame, nullptr);
 
         if(decode_size == 0)
         {
@@ -738,12 +1493,10 @@ int FrameDecode(void)
         }
     }while(0);
 
-    if(pDecBuf) av_free(pDecBuf);
-    if(parser) av_parser_close(parser);
-    if(c) avcodec_free_context(&c);
-    if(frame) av_frame_free(&frame);
-    if(filt_frame) av_frame_free(&filt_frame);
-    if(pkt) av_packet_free(&pkt);
+    if(pDecParserCtx) av_parser_close(pDecParserCtx);
+    if(pDecodecCtx) avcodec_free_context(&pDecodecCtx);
+    if(pDecFrame) av_frame_free(&pDecFrame);
+    if(pDecPkt) av_packet_free(&pDecPkt);
 
     return ret;
 }
@@ -761,11 +1514,11 @@ bool ReadRgb(uint8_t *pOut, uint32_t *pW, uint32_t *pH)
         }
 
         uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + RGB_DATA_QUEUE_NUM - rd_idx);
-        if(diff >= 5)
+        if(diff >= 25)
         {
-            printf("skip forward 5 frame \n");
+            rd_idx = (wr_idx > 0)?(wr_idx - 1):(RGB_DATA_QUEUE_NUM - 1);
+            printf("skip forward %d frame \n", diff - 1);
             fflush(stdout);
-            rd_idx = (rd_idx + 5 < RGB_DATA_QUEUE_NUM)?(rd_idx + 5):(rd_idx + 5 - RGB_DATA_QUEUE_NUM);
         }
 
         if(RgbDataQueue[rd_idx].size == 0)
@@ -826,23 +1579,31 @@ int CALLBACK EventHandle(long long llUserData, const char* strEvent, int event_t
 
 int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long llStamp, int type, int channel, long long llUserData)
 {
-    //    printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
-    //    fflush(stdout);
+    //        printf("type = 0x%x, lpBuf = %p, size = %u, llStamp = %lld, stream hdl = %p\n", type, static_cast<void *>(lpBuf), size, llStamp, stream);
+    //        fflush(stdout);
 #if 1
     switch (type)
     {
     case em_FrameType_Header_Frame:
         break;
     case em_FrameType_Video_IFrame:
+        GetVideoParam(lpBuf, size);
+
         if(is_first_iframe_recv)
         {
             SetNextWrBuf(H264DataIdx);
+
+            pDecodecCtx->gop_size = gop_cnt;
+            gop_cnt = 0;
+
         }
         else
         {
             is_first_iframe_recv = true;
+            gop_cnt = 0;
         }
 
+        is_skip_frame = false;
         if(CheckWrDataSeg(H264DataIdx, size) < 0)
         {
             is_skip_frame = true;
@@ -857,6 +1618,7 @@ int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long l
 
         if(is_first_iframe_recv)
         {
+            gop_cnt++;
             if(CheckWrSubDataSeg(H264DataIdx, size) < 0) break;
             InsertData(H264DataIdx, lpBuf, static_cast<uint32_t>(size));
         }
@@ -865,6 +1627,13 @@ int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long l
     default:
         break;
     }
+#else
+    static int64_t dts_cnt = 0;
+
+    InsertData(RtmpDataIdx, (uint8_t *)&dts_cnt, sizeof(dts_cnt));
+    InsertData(RtmpDataIdx, lpBuf, size);
+    SetNextWrBuf(RtmpDataIdx);
+    dts_cnt++;
 #endif
     return 0;
 }
@@ -921,20 +1690,159 @@ void EventHandleInit(void)
     EventHdl[NETEVENT_NOTIFY] = EventAlarmInfoHdl;
 }
 
-void *main_proc(void *arg)
+void *rtsp_proc(void *arg)
 {
+    AVFormatContext *pFmtCtx = nullptr;
+    AVCodecContext *pCodecCtx = nullptr;
+    AVCodec *pCodec;
+    AVPacket av_pkt;
+    int video_idx = -1;
+    unsigned int usleep_time;
+    const char rtsp_path[] = {"rtsp://admin:teamway123456@10.0.60.31:554/stream0"};
+
+    do
+    {
+        pFmtCtx = avformat_alloc_context();
+        if(!pFmtCtx)
+        {
+            printf("avformat_alloc_context fail\n");
+            fflush(stdout);
+            break;
+        }
+
+        if(avformat_open_input(&pFmtCtx, rtsp_path, nullptr, nullptr) < 0)
+        {
+            printf("avformat_open_input fail\n");
+            fflush(stdout);
+            break;
+        }
+
+        if(avformat_find_stream_info(pFmtCtx, nullptr) < 0)
+        {
+            printf("avformat_find_stream_info fail\n");
+            fflush(stdout);
+            break;
+        }
+
+        for(unsigned int i = 0;i < pFmtCtx->nb_streams;i++)
+        {
+            if(pFmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+            {
+                video_idx = i;
+            }
+        }
+        if(video_idx < 0)
+        {
+            printf("did not find video data\n");
+            fflush(stdout);
+            break;
+        }
+        pDecodecCtx->time_base = pFmtCtx->streams[video_idx]->time_base;
+        pDecodecCtx->framerate = pFmtCtx->streams[video_idx]->r_frame_rate;
+
+        pCodec = avcodec_find_decoder(pFmtCtx->streams[video_idx]->codecpar->codec_id);
+        if(!pCodec)
+        {
+            printf("did not find codec\n");
+            fflush(stdout);
+            break;
+        }
+
+        pCodecCtx = avcodec_alloc_context3(pCodec);
+        if(!pCodecCtx)
+        {
+            printf("avcodec_alloc_context3 fail\n");
+            fflush(stdout);
+            break;
+        }
+
+        if (avcodec_open2(pCodecCtx, pCodec, nullptr) < 0) {
+            fprintf(stderr, "Could not open codec\n");
+            fflush(stderr);
+            break;
+        }
+
+        if(pFmtCtx->streams[video_idx]->r_frame_rate.den <= 0 || pFmtCtx->streams[video_idx]->r_frame_rate.num <= 0)
+        {
+            printf("rtsp frame rate not correct\n");
+            fflush(stdout);
+            break;
+        }
+        usleep_time = pFmtCtx->streams[video_idx]->r_frame_rate.den * 1000000 / pFmtCtx->streams[video_idx]->r_frame_rate.num;
+        while(!av_read_frame(pFmtCtx, &av_pkt))
+        {
+            if(av_pkt.stream_index == video_idx)
+            {
+#if 0
+                GetVideoParam(av_pkt.data, av_pkt.size);
+                if(is_key_frame)
+                {
+                    if(is_first_iframe_recv)
+                    {
+                        SetNextWrBuf(H264DataIdx);
+                        pDecodecCtx->gop_size = counter;
+                        counter = 1;
+                    }
+                    else
+                    {
+                        is_first_iframe_recv = true;
+                        counter = 1;
+                    }
+
+                    is_skip_frame = false;
+                    if(CheckWrDataSeg(H264DataIdx, av_pkt.size) < 0)
+                    {
+                        is_skip_frame = true;
+                        break;
+                    }
+
+                    InsertData(H264DataIdx, av_pkt.data, static_cast<uint32_t>(av_pkt.size));
+                }
+                else
+                {
+                    counter++;
+                    if(is_skip_frame) break;
+
+                    if(is_first_iframe_recv)
+                    {
+                        if(CheckWrSubDataSeg(H264DataIdx, av_pkt.size) < 0) break;
+                        InsertData(H264DataIdx, av_pkt.data, static_cast<uint32_t>(av_pkt.size));
+                    }
+                }
+#else
+                InsertData(RtmpDataIdx, (uint8_t *)&av_pkt.dts, sizeof(av_pkt.dts));
+                InsertData(RtmpDataIdx, av_pkt.data, av_pkt.size);
+                SetNextWrBuf(RtmpDataIdx);
+#endif
+                //                usleep(usleep_time);
+            }
+        }
+    }while(0);
+
+    avcodec_close(pCodecCtx);
+    avcodec_free_context(&pCodecCtx);
+    avformat_close_input(&pFmtCtx);
+    if(pFmtCtx) avformat_free_context(pFmtCtx);
+
+    return nullptr;
+}
+
+void *decode_proc(void *arg)
+{
+    FrameDecodeInit();
+
     while(true)
     {
         if(is_dev_ready)
         {
-            int Ret = SDS_NetDevice_OpenStream("30013", 1, eMainStream, StreamHdl);
+            int Ret = SDS_NetDevice_OpenStream("30014", 1, eMainStream, StreamHdl);
             if(Ret != ERR_SUCCESS)
             {
                 printf("SDS_NetDevice_OpenStream errcode = 0x%x \n", Ret);
                 return nullptr;
             }
 
-            Ret = SDS_NetDevice_GetAlarm("30013", true);
+            Ret = SDS_NetDevice_GetAlarm("30014", true);
             if(Ret != ERR_SUCCESS)
             {
                 printf("SDS_NetDevice_GetAlarm errcode = 0x%x \n", Ret);
@@ -943,13 +1851,38 @@ void *main_proc(void *arg)
             is_dev_ready = false;
         }
 
-        if(GetRdDataSize(H264DataIdx) > 0)
+        uint32_t rd_size = GetRdDataSize(H264DataIdx);
+        if(rd_size > 0)
         {
             FrameDecode();
         }
-
         usleep(30000);
     }
+}
+
+void *yuv_proc(void *arg)
+{
+    EncodecInit();
+
+    while(true)
+    {
+        FrameEncode();
+        usleep(10000);
+    }
+}
+
+void *rtmp_send_proc(void *arg)
+{
+    //    RtmpServerInit();
+    SetCallBackFunc(video_param, (void *)GetVideoParamCb);
+    SetCallBackFunc(video_data, (void *)GetVideoDataCb);
+    RtmpServerStart();
+
+    //    while(true)
+    //    {
+    //        FrameDecode2();
+    //        usleep(30000);
+    //    }
 }
 
 int main(int argc, char *argv[])
@@ -965,8 +1898,8 @@ int main(int argc, char *argv[])
 
     EventHandleInit();
 
-    pVideoPlayer = new QtPlayer;
-    pVideoPlayer->GetRgb = ReadRgb;
+    //    pVideoPlayer = new QtPlayer;
+    //    pVideoPlayer->GetRgb = ReadRgb;
 
     memset((void *)RgbDataQueue, 0, sizeof(StruDefRgbData) * RGB_DATA_QUEUE_NUM);
     RgbDataQueue[0].pRgb = DispDataBuf;
@@ -982,7 +1915,21 @@ int main(int argc, char *argv[])
     H264DataIdx = QueueBufRegister(H264DataBuf, H264_DATA_BUF_SIZE, 256, 256);
     if(H264DataIdx < 0)
     {
-        fprintf(stderr, "QueueBufRegister err \n");
+        fprintf(stderr, "H264DataBuf QueueBufRegister err \n");
+        fflush(stderr);
+        return -1;
+    }
+    YuvDataIdx = QueueBufRegister(YuvDataBuf, YUV_DATA_BUF_SIZE, 256, 3);
+    if(YuvDataIdx < 0)
+    {
+        fprintf(stderr, "YuvDataBuf QueueBufRegister err \n");
+        fflush(stderr);
+        return -1;
+    }
+    RtmpDataIdx = QueueBufRegister(RtmpDataBuf, RTMP_DATA_BUF_SIZE, 256, 1);
+    if(RtmpDataIdx < 0)
+    {
+        fprintf(stderr, "RtmpDataBuf QueueBufRegister err \n");
         fflush(stderr);
         return -1;
     }
@@ -1001,8 +1948,17 @@ int main(int argc, char *argv[])
         return Ret;
     }
 
-    pthread_t main_pth;
-    pthread_create(&main_pth, nullptr, main_proc, nullptr);
+    pthread_mutex_init(&video_param_mtx, nullptr);
+    //    pthread_t rtsp_pth;
+    pthread_t decode_pth;
+    pthread_t yuv_pth;
+    pthread_t rtmp_send_pth;
+    //    pthread_create(&rtsp_pth, nullptr, rtsp_proc, nullptr);
+    pthread_create(&decode_pth, nullptr, decode_proc, nullptr);
+    pthread_create(&yuv_pth, nullptr, yuv_proc, nullptr);
+    pthread_create(&rtmp_send_pth, nullptr, rtmp_send_proc, nullptr);
+
+    //    PlayMp4File("../rtmp_test.mp4");
 
     return a.exec();
 }
