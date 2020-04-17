@@ -86,7 +86,7 @@ void QueueBufFree()
     }
 }
 
-int32_t CheckWrDataSeg(uint32_t idx, uint32_t wr_size)
+int32_t CheckWrDataSeg(int32_t idx, uint32_t wr_size)
 {
     uint32_t wr_idx = pQueueBuf[idx].SegWrIdx;
     bool is_skip_wr = false;
@@ -128,7 +128,7 @@ int32_t CheckWrDataSeg(uint32_t idx, uint32_t wr_size)
     return 0;
 }
 
-int32_t CheckWrSubDataSeg(uint32_t idx, uint32_t wr_size)
+int32_t CheckWrSubDataSeg(int32_t idx, uint32_t wr_size)
 {
     uint32_t rd_idx = pQueueBuf[idx].SegRdIdx;
     uint32_t sub_wr_idx = pQueueBuf[idx].SubSegWrIdx;
@@ -169,7 +169,7 @@ int32_t CheckWrSubDataSeg(uint32_t idx, uint32_t wr_size)
     return 0;
 }
 
-void InsertData(uint32_t idx, uint8_t *pData, uint32_t size)
+void InsertData(int32_t idx, uint8_t *pData, uint32_t size)
 {
     uint32_t sub_wr_idx = pQueueBuf[idx].SubSegWrIdx;
     uint8_t *pWr = pQueueBuf[idx].pSubQueue[sub_wr_idx].pDataSeg;
@@ -199,7 +199,7 @@ void InsertData(uint32_t idx, uint8_t *pData, uint32_t size)
 //    }
 }
 
-void SetNextWrBuf(uint32_t idx)
+void SetNextWrBuf(int32_t idx)
 {
     uint32_t wr_idx = pQueueBuf[idx].SegWrIdx;
     uint32_t sub_wr_idx = pQueueBuf[idx].SubSegWrIdx;
@@ -234,7 +234,7 @@ void SetNextWrBuf(uint32_t idx)
 //    }
 }
 
-uint32_t GetRdDataSize(uint32_t idx)
+uint32_t GetRdDataSize(int32_t idx)
 {
     uint32_t rd_idx =  pQueueBuf[idx].SegRdIdx;
     uint32_t rd_size = pQueueBuf[idx].pQueueDataSeg[rd_idx].size;
@@ -242,7 +242,7 @@ uint32_t GetRdDataSize(uint32_t idx)
     return rd_size;
 }
 
-int32_t ReadData(uint32_t idx, uint8_t *pOut)
+int32_t ReadData(int32_t idx, uint8_t *pOut)
 {
     if(!pOut) return -1;
 

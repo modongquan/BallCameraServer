@@ -6,29 +6,23 @@
 QtPlayer::QtPlayer():PlayerTimer(this), PlayCounter(0)
 {
     QRect rect = geometry();
-    rect.setWidth(1920);
-    rect.setHeight(1080);
+    rect.setWidth(640);
+    rect.setHeight(480);
     setGeometry(rect);
     rect = geometry();
 
     connect(&PlayerTimer, SIGNAL(timeout()), this, SLOT(PlayerProc()));
-    PlayerTimer.start(30);
+    PlayerTimer.start(10);
 }
 
 void QtPlayer::paintEvent(QPaintEvent *e)
 {
     if(GetRgb == nullptr) return;
 
-    uint32_t w = 0, h = 0;
+    QImage DispImg(640, 480, QImage::Format_RGB32);
 
-    if(!GetRgb(nullptr, &w, &h))
-    {
-        return;
-    }
-    if(w == 0 || h == 0) return;
-
-    QImage DispImg(w, h, QImage::Format_RGB32);
-    if(!GetRgb(DispImg.bits(), nullptr, nullptr))
+    int32_t rd_size = GetRgb(DispImg.bits(), DispImg.sizeInBytes());
+    if(rd_size <= 0)
     {
         return;
     }

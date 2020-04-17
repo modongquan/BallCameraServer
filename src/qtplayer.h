@@ -4,7 +4,7 @@
 #include <QOpenGLWidget>
 #include <QTimer>
 
-typedef bool (*FuncCB)(uint8_t *, uint32_t *, uint32_t *);
+typedef int32_t (*FuncCB)(uint8_t *, uint32_t);
 
 class QtPlayer : public QOpenGLWidget
 {

@@ -51,6 +51,7 @@ using namespace sds::error;
 using namespace SDS_Device::enums;
 
 //#define HARDWARE_ENCODE_DEF
+#define LOCAL_PLAY_DEF
 
 #define EVENT_TYPE_NUM  (NETEVENT_DOWNLOADING_FILE + 1)
 #define DEVICE_ID_SIZE  32
@@ -71,11 +72,6 @@ using namespace SDS_Device::enums;
 #define COORDINATES_MAX_NUM 64
 
 typedef void (*EventHandleDef)(const char*);
-typedef struct
-{
-    uint8_t *pRgb;
-    uint32_t size;
-}StruDefRgbData;
 
 EventHandleDef EventHdl[EVENT_TYPE_NUM];
 char DeviceId[DEVICE_ID_SIZE];
@@ -94,19 +90,15 @@ int32_t YuvDataIdx = 0;
 uint8_t YuvBuf[READ_ONE_FRAME_SIZE];
 
 uint8_t RtmpDataBuf[RTMP_DATA_BUF_SIZE];
-uint32_t RtmpDataIdx = 0;
+int32_t RtmpDataIdx = 0;
 uint8_t RtmpReadBuf[READ_ONE_RTMP_SIZE];
 
 QtPlayer *pVideoPlayer;
-int32_t video_w = 0;
-int32_t video_h = 0;
 int64_t encode_idx = 0;
 
 uint8_t DispDataBuf[DISP_DATA_BUF_SIZE];
-StruDefRgbData RgbDataQueue[RGB_DATA_QUEUE_NUM];
-volatile uint32_t QueueRdIdx = 0;
-volatile uint32_t QueueWrIdx = 0;
 uint8_t RgbBuf[READ_ONE_FRAME_SIZE];
+int32_t DispDataIdx = 0;
 
 uint8_t SpsBuf[SPS_DATA_BUF_SIZE];
 volatile uint32_t SpsSize = 0;
@@ -141,104 +133,6 @@ AVFrame *pEncHwFrame;
 #endif
 AVPacket *pEncPkt;
 
-bool CheckRgbWrBuf(uint32_t rgb_size)
-{
-    uint32_t wr_idx = QueueWrIdx;
-
-    do{
-        uint32_t rd_idx = QueueRdIdx;
-        uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb;
-        uint8_t *pRd = RgbDataQueue[rd_idx].pRgb;
-
-        uint32_t diff = static_cast<uint32_t>((pWr >= pRd)?(pWr - pRd):(pWr + DISP_DATA_BUF_SIZE - pRd));
-        if(diff + rgb_size > DISP_DATA_BUF_SIZE)
-        {
-            printf("write the current frame to preview display buf \n");
-            fflush(stdout);
-
-            wr_idx = (wr_idx > 0)?(wr_idx - 1):(RGB_DATA_QUEUE_NUM - 1);
-            if(wr_idx == rd_idx)
-            {
-                return false;
-            }
-            continue;
-        }
-        break;
-    }while(1);
-
-    QueueWrIdx = wr_idx;
-    return true;
-}
-
-uint8_t *GetRgbWrBuf(uint32_t rgb_size)
-{
-    uint32_t wr_idx = QueueWrIdx;
-    uint32_t rd_idx = QueueRdIdx;
-    uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb;
-    uint8_t *pRd = RgbDataQueue[rd_idx].pRgb;
-
-    do{
-        uint32_t diff = static_cast<uint32_t>((pWr >= pRd)?(pWr - pRd):(pWr + DISP_DATA_BUF_SIZE - pRd));
-        if(diff + rgb_size > DISP_DATA_BUF_SIZE)
-        {
-            printf("write the current frame to preview display buf \n");
-            fflush(stdout);
-
-            wr_idx = (wr_idx > 0)?(wr_idx - 1):0;
-            if(wr_idx == rd_idx)
-            {
-                return nullptr;
-            }
-            continue;
-        }
-        break;
-    }while(1);
-
-    QueueWrIdx = wr_idx;
-    return RgbDataQueue[QueueWrIdx].pRgb;
-}
-
-void PushRgb(uint8_t rgb, uint32_t idx)
-{
-    uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb;
-    if(pWr + idx >= DispDataBuf + DISP_DATA_BUF_SIZE)
-    {
-        pWr = pWr + idx - DISP_DATA_BUF_SIZE;
-    }
-    else
-    {
-        pWr += idx;
-    }
-    *pWr = rgb;
-}
-
-void InsertRgb(uint8_t *pRgb, uint32_t size, uint32_t idx)
-{
-    for(uint32_t i = 0;i < size;i ++)
-    {
-        PushRgb(pRgb[i], idx + i);
-    }
-}
-
-void SetNextRgbWrBuf(uint32_t rgb_size)
-{
-    uint8_t *pWr = RgbDataQueue[QueueWrIdx].pRgb + rgb_size;
-    uint8_t *pOut = RgbDataQueue[QueueWrIdx].pRgb;
-
-    RgbDataQueue[QueueWrIdx].size = rgb_size;
-    QueueWrIdx = (QueueWrIdx + 1 < RGB_DATA_QUEUE_NUM)?(QueueWrIdx + 1):0;
-    if(pWr < DispDataBuf + DISP_DATA_BUF_SIZE)
-    {
-        RgbDataQueue[QueueWrIdx].pRgb = pWr;
-    }
-    else
-    {
-        RgbDataQueue[QueueWrIdx].pRgb = pWr - DISP_DATA_BUF_SIZE;
-    }
-
-    //    printf("wr rgb buf = (%p - %p) \n", pOut, pOut + rgb_size);
-    //    fflush(stdout);
-}
 
 void PlayMp4File(const char *pFile)
 {
@@ -860,59 +754,69 @@ void FrameEncode(void)
 
 void YuvToRgb(void)
 {
+    if(!GetRdDataSize(YuvDataIdx)) return;
+
     enum AVPixelFormat rgb_fmt = AV_PIX_FMT_RGB32;
     enum AVPixelFormat yuv_fmt = AV_PIX_FMT_YUV420P;
-    int image_size = av_image_get_buffer_size(rgb_fmt, video_w, video_h, 4);
+    int image_size = av_image_get_buffer_size(rgb_fmt, 640, 480, 4);
     if(image_size <= 0) return;
 
     uint32_t rgb_size = static_cast<uint32_t>(image_size);
-    if(!CheckRgbWrBuf(rgb_size)) return;
+    if(CheckWrDataSeg(YuvDataIdx, rgb_size) < 0) return;
 
     struct SwsContext *pSwsCtx = nullptr;
     AVFrame *pRgbFrame = nullptr;
     AVFrame *pYuvFrame = nullptr;
 
+    pRgbFrame = av_frame_alloc();
+    if(pRgbFrame == nullptr) return;
+    pYuvFrame = av_frame_alloc();
+    if(pYuvFrame == nullptr) return;
+
+    if(av_image_alloc(pRgbFrame->data, pRgbFrame->linesize, 640, 480, rgb_fmt, 32) < 0) return;
+    if(av_image_alloc(pYuvFrame->data, pYuvFrame->linesize, pDecodecCtx->width,
+                   pDecodecCtx->height, yuv_fmt, 16) < 0) return;
+
+    pSwsCtx = sws_getCachedContext(nullptr, pDecodecCtx->width, pDecodecCtx->height, yuv_fmt,
+                                   640, 480, rgb_fmt, SWS_BILINEAR,
+                                   nullptr, nullptr, nullptr);
+    if(pSwsCtx == nullptr)
+    {
+        fprintf(stderr, "sws_getCachedContext error\n");
+        fflush(stderr);
+        return;
+    }
     while(!ReadData(YuvDataIdx, YuvBuf))
     {
-        pSwsCtx = sws_getCachedContext(nullptr, video_w, video_h, yuv_fmt,
-                                       video_w, video_h, rgb_fmt, SWS_BICUBIC,
-                                       nullptr, nullptr, nullptr);
-        if(pSwsCtx == nullptr)
-        {
-            fprintf(stderr, "sws_getCachedContext error\n");
-            fflush(stderr);
-            return;
-        }
+//        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, pDecodecCtx->width, pDecodecCtx->height, 4);
+//        pRgbFrame->data[0] = RgbBuf;
+//        pRgbFrame->format = rgb_fmt;
+//        pRgbFrame->width = 640;
+//        pRgbFrame->height = 480;
 
-        pRgbFrame = av_frame_alloc();
-        if(pRgbFrame == nullptr) break;
-        pYuvFrame = av_frame_alloc();
-        if(pYuvFrame == nullptr) break;
-
-        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, video_w, video_h, 4);
-        pRgbFrame->format = rgb_fmt;
-
-        int32_t y_size = video_w * video_h;
-        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, video_w, video_h, 4);
-        pYuvFrame->data[0] = YuvBuf;
-        pYuvFrame->data[1] = YuvBuf + y_size;
-        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
-        pYuvFrame->format = yuv_fmt;
-        pYuvFrame->width = video_w;
-        pYuvFrame->height = video_h;
+        int32_t y_size = pDecodecCtx->width * pDecodecCtx->height;
+        memcpy(pYuvFrame->data[0], YuvBuf, y_size * 3 / 2);
+//        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, pDecodecCtx->width, pDecodecCtx->height, 4);
+//        pYuvFrame->data[0] = YuvBuf;
+//        pYuvFrame->data[1] = YuvBuf + y_size;
+//        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
+//        pYuvFrame->format = yuv_fmt;
+//        pYuvFrame->width = pDecodecCtx->width;
+//        pYuvFrame->height = pDecodecCtx->height;
         //        SaveImageDataToFile(pYuvFrame, "./test2.jpg");
 
-        sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, video_h, pRgbFrame->data, pRgbFrame->linesize);
+        sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, pDecodecCtx->height, pRgbFrame->data, pRgbFrame->linesize);
 
-        InsertRgb(pRgbFrame->data[0], rgb_size, 0);
-
-        SetNextRgbWrBuf(rgb_size);
+        InsertData(DispDataIdx, pRgbFrame->data[0], rgb_size);
+        SetNextWrBuf(DispDataIdx);
     }
 
     //    char file_name[128];
     //    snprintf(file_name, 128, "%s%d%s", test, counter++, ".bmp");
     //    CreateBmp(file_name, pRgbFrame->data[0], pFrame->width, pFrame->height, 32);
 
+    av_freep(&pYuvFrame->data[0]);
+    av_freep(&pRgbFrame->data[0]);
     av_frame_free(&pYuvFrame);
     av_frame_free(&pRgbFrame);
     if(pSwsCtx) sws_freeContext(pSwsCtx);
@@ -1084,6 +988,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
         //            break;
         //        }
 
+        AVFrame *pFrameSent;
 
         if(Coordinates.size() > 0)
         {
@@ -1093,55 +998,13 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
             int32_t h = abs(y - Coordinates[0].right_bottom_y);
             FiltersDraw(dec_ctx, frame, filt_frame, x, y, w, h);
             Coordinates.erase(Coordinates.begin());
-
-            SendFrameToYuvProc(filt_frame);
+            pFrameSent = filt_frame;
         }
         else
         {
-            SendFrameToYuvProc(frame);
+            pFrameSent = frame;
         }
-        video_w = dec_ctx->width;
-        video_h = dec_ctx->height;
-    }
-}
-
-void decode2(AVCodecContext *dec_ctx, AVFrame *frame, AVPacket *pkt)
-{
-    int ret;
-
-    ret = avcodec_send_packet(dec_ctx, pkt);
-    if (ret < 0) {
-        fprintf(stderr, "Error sending a packet for decoding\n");
-        fflush(stderr);
-        return;
-    }
-
-    while(ret >= 0)
-    {
-        ret = avcodec_receive_frame(dec_ctx, frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            return;
-        else if (ret < 0) {
-            fprintf(stderr, "Error during decoding\n");
-            fflush(stderr);
-            return;
-        }
-        SaveImageDataToFile(frame, "./test1.jpg");
-
-        //        switch (frame->pict_type) {
-        //        case AV_PICTURE_TYPE_I:
-        //            printf("i frame \n");
-        //            break;
-        //        case AV_PICTURE_TYPE_B:
-        //            printf("b frame \n");
-        //            break;
-        //        case AV_PICTURE_TYPE_P:
-        //            printf("p frame \n");
-        //            break;
-        //        default:
-        //            printf("other frame \n");
-        //            break;
-        //        }
+        SendFrameToYuvProc(pFrameSent);
     }
 }
 
@@ -1261,7 +1124,7 @@ int FrameDecode(void)
 {
     uint8_t *pDecBuf = H264ReadBuf;
     uint32_t decode_size;
-    int32_t ret;
+    int ret;
     struct timeval start_time, end_time;
 
     do{
@@ -1321,249 +1184,27 @@ int FrameDecode(void)
     return ret;
 }
 
-bool JudgeKeyFrame(uint8_t *pVideoData, uint32_t size)
+int32_t ReadRgb(uint8_t *pOut, uint32_t size)
 {
-    if(pVideoData == nullptr) return false;
+    if(!pOut) return -1;
 
-    uint32_t idx = 0;
-    uint8_t *pSPSData = nullptr;
-    uint32_t sps_size = 0;
-    uint8_t *pPPSData = nullptr;
-    uint32_t pps_size = 0;
-    uint8_t divide_sps_status = 0; /* 0:init 1:counting 2:over */
-    uint8_t divide_pps_status = 0; /* 0:init 1:counting 2:over */
-
-    while (idx < size)
+    uint32_t rd_size = GetRdDataSize(DispDataIdx);
+    if(!rd_size) return 0;
+    else if(rd_size > size)
     {
-        uint32_t divide1 = *(uint32_t *)(pVideoData + idx);
-        uint32_t divide2 = (divide1 & 0x00ffffff);
-
-        if(divide1 != 0x01000000 && divide2 != 0x00010000)
-        {
-            idx++;
-            if(divide_sps_status == 1) sps_size++;
-            else if(divide_pps_status == 1) pps_size++;
-            continue;
-        }
-        if(divide_sps_status == 1)
-        {
-            divide_sps_status = 2;
-        }
-        else if(divide_pps_status == 1)
-        {
-            divide_pps_status = 2;
-        }
-
-        if(divide1 == 0x01000000) idx += sizeof(uint32_t);
-        else if(divide2 == 0x00010000) idx += 3;
-
-        if((pVideoData[idx] & 0x1f) == 0x7)
-        {
-            pSPSData = (pVideoData + idx++);
-            sps_size = 1;
-            divide_sps_status = 1;
-        }
-        else if((pVideoData[idx] & 0x1f) == 0x8)
-        {
-            pPPSData = (pVideoData + idx++);
-            pps_size = 1;
-            divide_pps_status = 1;
-        }
-        else if((pVideoData[idx] & 0x1f) == 0x5)
-        {
-            return true;
-        }
-        else if((pVideoData[idx] & 0x1f) == 0x1)
-        {
-            return false;
-        }
+        printf("read rgb buf not enough\n");
+        fflush(stdout);
+        return -1;
     }
 
-    return false;
-}
-
-uint8_t testBuf[RTMP_DATA_BUF_SIZE];
-int FrameDecode2(void)
-{
-    AVCodecContext *pDecodecCtx = nullptr;
-    const AVCodec *pDecodec = nullptr;
-    AVCodecParserContext *pDecParserCtx = nullptr;
-    AVFrame *pDecFrame = nullptr;
-    AVPacket *pDecPkt = nullptr;
-
-    static uint32_t off = 0;
-    uint8_t *pDecBuf = RtmpDataBuf + off;
-    uint32_t decode_size;
-    int32_t ret;
-
-    do{
-        decode_size = GetRdDataSize(RtmpDataIdx);
-        if(decode_size == 0)
-        {
-            fprintf(stderr, "%s : get decode data size is zero \n", __FUNCTION__);
-            fflush(stderr);
-            break;
-        }
-
-        if(ReadData(RtmpDataIdx, pDecBuf) < 0)
-        {
-            fprintf(stderr, "%s : read data fail to decode \n", __FUNCTION__);
-            fflush(stderr);
-            break;
-        }
-
-        if(JudgeKeyFrame(pDecBuf, decode_size))
-        {
-            memcpy(testBuf, pDecBuf, decode_size);
-            off = decode_size;
-            continue;
-        }
-        else
-        {
-            memcpy(testBuf + off, pDecBuf, decode_size);
-        }
-
-        /* find the MPEG-1 video decoder */
-        pDecodec = avcodec_find_decoder(AV_CODEC_ID_H264);
-        if (!pDecodec) {
-            fprintf(stderr, "Codec not found\n");
-            fflush(stderr);
-            return -1;
-        }
-
-        pDecParserCtx = av_parser_init(pDecodec->id);
-        if (!pDecParserCtx) {
-            fprintf(stderr, "parser not found\n");
-            fflush(stderr);
-            return -1;
-        }
-
-        pDecodecCtx = avcodec_alloc_context3(pDecodec);
-        if (!pDecodecCtx) {
-            fprintf(stderr, "Could not allocate video codec context\n");
-            fflush(stderr);
-            return -1;
-        }
-
-        pDecFrame = av_frame_alloc();
-        if (!pDecFrame) {
-            fprintf(stderr, "Could not allocate video frame or filt frame\n");
-            fflush(stderr);
-            return -1;
-        }
-
-        pDecPkt = av_packet_alloc();
-        if (!pDecPkt){
-            fflush(stderr);
-            return -1;
-        }
-
-        if (avcodec_open2(pDecodecCtx, pDecodec, nullptr) < 0) {
-            fprintf(stderr, "Could not open codec\n");
-            fflush(stderr);
-            return -1;
-        }
-
-        /* use the parser to split the data into frames */
-        uint8_t *pData = testBuf;
-        while(decode_size > 0)
-        {
-            ret = av_parser_parse2(pDecParserCtx, pDecodecCtx, &pDecPkt->data, &pDecPkt->size,
-                                   pData, off + decode_size, AV_NOPTS_VALUE, AV_NOPTS_VALUE, 0);
-            if (ret < 0) {
-                fprintf(stderr, "Error while parsing\n");
-                break;
-            }
-
-            /* flush the decoder */
-            if(pDecPkt->size)
-            {
-                //                FrameBsf(pDecodecCtx, pDecPkt);
-                decode2(pDecodecCtx, pDecFrame, pDecPkt);
-            }
-
-            pData += ret;
-            decode_size -= ret;
-        }
-        decode2(pDecodecCtx, pDecFrame, nullptr);
-
-        if(decode_size == 0)
-        {
-            ret = 0;
-        }
-    }while(0);
-
-    if(pDecParserCtx) av_parser_close(pDecParserCtx);
-    if(pDecodecCtx) avcodec_free_context(&pDecodecCtx);
-    if(pDecFrame) av_frame_free(&pDecFrame);
-    if(pDecPkt) av_packet_free(&pDecPkt);
-
-    return ret;
-}
-
-bool ReadRgb(uint8_t *pOut, uint32_t *pW, uint32_t *pH)
-{
-    if(pOut)
+    if(ReadData(DispDataIdx, pOut) < 0)
     {
-        uint32_t rd_idx = QueueRdIdx;
-        uint32_t wr_idx = QueueWrIdx;
-
-        if(rd_idx == QueueWrIdx)
-        {
-            return false;
-        }
-
-        uint32_t diff = (wr_idx >= rd_idx)?(wr_idx - rd_idx):(wr_idx + RGB_DATA_QUEUE_NUM - rd_idx);
-        if(diff >= 25)
-        {
-            rd_idx = (wr_idx > 0)?(wr_idx - 1):(RGB_DATA_QUEUE_NUM - 1);
-            printf("skip forward %d frame \n", diff - 1);
-            fflush(stdout);
-        }
-
-        if(RgbDataQueue[rd_idx].size == 0)
-        {
-            return false;
-        }
-
-        uint8_t *pRgb = RgbDataQueue[rd_idx].pRgb;
-        uint32_t rgb_size = RgbDataQueue[rd_idx].size;
-        if(pRgb + rgb_size <= DispDataBuf + DISP_DATA_BUF_SIZE)
-        {
-            memcpy(pOut, pRgb, rgb_size);
-        }
-        else
-        {
-            size_t cpy_size = static_cast<size_t>(DispDataBuf + DISP_DATA_BUF_SIZE - pRgb);
-            memcpy(pOut, pRgb, cpy_size);
-            memcpy(pOut + cpy_size, DispDataBuf, rgb_size - cpy_size);
-        }
-
-        //        printf("rd rgb buf = (%p - %p) \n",static_cast<void *>(pRgb), static_cast<void *>(pRgb + rgb_size));
-        //        fflush(stdout);
-
-        RgbDataQueue[rd_idx].pRgb = nullptr;
-        RgbDataQueue[rd_idx].size = 0;
-
-        if(++rd_idx >= RGB_DATA_QUEUE_NUM)
-        {
-            rd_idx = 0;
-        }
-        QueueRdIdx = rd_idx;
-
-        return true;
+        printf("read display data fail\n");
+        fflush(stdout);
+        return -1;
     }
-    else if(pW && pH)
-    {
-        *pW = video_w;
-        *pH = video_h;
 
-        return true;
-    }
-    else
-    {
-        return false;
-    }
+    return rd_size;
 }
 
 int CALLBACK EventHandle(long long llUserData, const char* strEvent, int event_type)
@@ -1866,7 +1507,11 @@ void *yuv_proc(void *arg)
 
     while(true)
     {
+#ifdef LOCAL_PLAY_DEF
+        YuvToRgb();
+#else
         FrameEncode();
+#endif
         usleep(10000);
     }
 }
@@ -1898,13 +1543,10 @@ int main(int argc, char *argv[])
 
     EventHandleInit();
 
-    //    pVideoPlayer = new QtPlayer;
-    //    pVideoPlayer->GetRgb = ReadRgb;
-
-    memset((void *)RgbDataQueue, 0, sizeof(StruDefRgbData) * RGB_DATA_QUEUE_NUM);
-    RgbDataQueue[0].pRgb = DispDataBuf;
-    //    printf("DispDataBuf = (0x%x - 0x%x) \n", DispDataBuf, DispDataBuf + DISP_DATA_BUF_SIZE);
-    //    fflush(stdout);
+#ifdef LOCAL_PLAY_DEF
+        pVideoPlayer = new QtPlayer;
+        pVideoPlayer->GetRgb = ReadRgb;
+#endif
 
     if(QueueBufInit(256) < 0)
     {
@@ -1933,6 +1575,13 @@ int main(int argc, char *argv[])
         fflush(stderr);
         return -1;
     }
+    DispDataIdx = QueueBufRegister(DispDataBuf, DISP_DATA_BUF_SIZE, 256, 3);
+    if(DispDataIdx < 0)
+    {
+        fprintf(stderr, "DispDataBuf QueueBufRegister err \n");
+        fflush(stderr);
+        return -1;
+    }
 
     st_work_param work_param;
     const char server_ip[] = {"10.0.48.66"};
@@ -1952,13 +1601,16 @@ int main(int argc, char *argv[])
     //    pthread_t rtsp_pth;
     pthread_t decode_pth;
     pthread_t yuv_pth;
-    pthread_t rtmp_send_pth;
+
     //    pthread_create(&rtsp_pth, nullptr, rtsp_proc, nullptr);
     pthread_create(&decode_pth, nullptr, decode_proc, nullptr);
     pthread_create(&yuv_pth, nullptr, yuv_proc, nullptr);
-    pthread_create(&rtmp_send_pth, nullptr, rtmp_send_proc, nullptr);
+#ifndef LOCAL_PLAY_DEF
+    pthread_t rtmp_send_pth;
 
+    pthread_create(&rtmp_send_pth, nullptr, rtmp_send_proc, nullptr);
     //    PlayMp4File("../rtmp_test.mp4");
+#endif
 
     return a.exec();
 }
