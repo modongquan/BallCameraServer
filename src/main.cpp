@@ -9,6 +9,8 @@
 #include <math.h>
 #include <inttypes.h>
 #include <sys/time.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
 #include <QApplication>
 
@@ -56,10 +58,13 @@ using namespace SDS_Device::enums;
 #define EVENT_TYPE_NUM  (NETEVENT_DOWNLOADING_FILE + 1)
 #define DEVICE_ID_SIZE  32
 
+#define DECODE_CACHE_FRAME_NUM  10
+
 #define H264_DATA_BUF_SIZE  (10*1024*1024)
 #define YUV_DATA_BUF_SIZE   (300*1024*1024)
 #define DISP_DATA_BUF_SIZE  (50*1024*1024)
 #define RTMP_DATA_BUF_SIZE  (1024*1024)
+#define I_FRAME_CACHE_SIZE  (300*1024)
 
 #define READ_ONE_FRAME_SIZE (10*1024*1024)
 #define READ_ONE_GOP_SIZE   (1024*1024)
@@ -106,6 +111,9 @@ volatile uint32_t SpsSize = 0;
 uint8_t PpsBuf[PPS_DATA_BUF_SIZE];
 volatile uint32_t PpsSize = 0;
 
+uint8_t IFrameCache[I_FRAME_CACHE_SIZE];
+uint32_t IFrameSize = 0;
+
 pthread_mutex_t video_param_mtx;
 bool is_key_frame = false;
 
@@ -114,8 +122,6 @@ char jpg[32] = {".jpg"};
 
 uint32_t gop_cnt = 0;
 struct timeval start_time, end_time;
-
-std::vector<StruDefCoordinate> Coordinates;
 
 AVCodecContext *pDecodecCtx;
 const AVCodec *pDecodec;
@@ -756,9 +762,14 @@ void YuvToRgb(void)
 {
     if(!GetRdDataSize(YuvDataIdx)) return;
 
+    int src_width = 1920;
+    int src_height = 1080;
+    int dst_width = 640;
+    int dst_height = 480;
+
     enum AVPixelFormat rgb_fmt = AV_PIX_FMT_RGB32;
     enum AVPixelFormat yuv_fmt = AV_PIX_FMT_YUV420P;
-    int image_size = av_image_get_buffer_size(rgb_fmt, 640, 480, 4);
+    int image_size = av_image_get_buffer_size(rgb_fmt, dst_width, dst_height, 4);
     if(image_size <= 0) return;
 
     uint32_t rgb_size = static_cast<uint32_t>(image_size);
@@ -773,12 +784,12 @@ void YuvToRgb(void)
     pYuvFrame = av_frame_alloc();
     if(pYuvFrame == nullptr) return;
 
-    if(av_image_alloc(pRgbFrame->data, pRgbFrame->linesize, 640, 480, rgb_fmt, 32) < 0) return;
-    if(av_image_alloc(pYuvFrame->data, pYuvFrame->linesize, pDecodecCtx->width,
-                   pDecodecCtx->height, yuv_fmt, 16) < 0) return;
+    if(av_image_alloc(pRgbFrame->data, pRgbFrame->linesize, dst_width, dst_height, rgb_fmt, 32) < 0) return;
+    if(av_image_alloc(pYuvFrame->data, pYuvFrame->linesize, src_width,
+                   src_height, yuv_fmt, 16) < 0) return;
 
-    pSwsCtx = sws_getCachedContext(nullptr, pDecodecCtx->width, pDecodecCtx->height, yuv_fmt,
-                                   640, 480, rgb_fmt, SWS_BILINEAR,
+    pSwsCtx = sws_getCachedContext(nullptr, src_width, src_height, yuv_fmt,
+                                   dst_width, dst_height, rgb_fmt, SWS_BILINEAR,
                                    nullptr, nullptr, nullptr);
     if(pSwsCtx == nullptr)
     {
@@ -788,24 +799,24 @@ void YuvToRgb(void)
     }
     while(!ReadData(YuvDataIdx, YuvBuf))
     {
-//        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, pDecodecCtx->width, pDecodecCtx->height, 4);
+//        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, src_width, src_height, 4);
 //        pRgbFrame->data[0] = RgbBuf;
 //        pRgbFrame->format = rgb_fmt;
-//        pRgbFrame->width = 640;
-//        pRgbFrame->height = 480;
+//        pRgbFrame->width = dst_width;
+//        pRgbFrame->height = dst_height;
 
-        int32_t y_size = pDecodecCtx->width * pDecodecCtx->height;
+        int32_t y_size = src_width * src_height;
         memcpy(pYuvFrame->data[0], YuvBuf, y_size * 3 / 2);
-//        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, pDecodecCtx->width, pDecodecCtx->height, 4);
+//        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, src_width, src_height, 4);
 //        pYuvFrame->data[0] = YuvBuf;
 //        pYuvFrame->data[1] = YuvBuf + y_size;
 //        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
 //        pYuvFrame->format = yuv_fmt;
-//        pYuvFrame->width = pDecodecCtx->width;
-//        pYuvFrame->height = pDecodecCtx->height;
+//        pYuvFrame->width = src_width;
+//        pYuvFrame->height = src_height;
         //        SaveImageDataToFile(pYuvFrame, "./test2.jpg");
 
-        sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, pDecodecCtx->height, pRgbFrame->data, pRgbFrame->linesize);
+        sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, src_height, pRgbFrame->data, pRgbFrame->linesize);
 
         InsertData(DispDataIdx, pRgbFrame->data[0], rgb_size);
         SetNextWrBuf(DispDataIdx);
@@ -822,7 +833,7 @@ void YuvToRgb(void)
     if(pSwsCtx) sws_freeContext(pSwsCtx);
 }
 
-int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, int32_t x, int32_t y, int32_t w, int32_t h)
+int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, int32_t x, int32_t y, int32_t w, int32_t h, int32_t type)
 {
     char args[512];
     char draw_desc[128];
@@ -836,9 +847,18 @@ int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, in
     AVFilterContext *buffersrc_ctx;
     AVRational time_base = dec_ctx->time_base;
     enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_NONE };
+    char color[64];
 
-    sprintf(draw_desc, "drawbox=x=%d:y=%d:w=%d:h=%d:color=yellow@1",
-            x, y, w, h);
+    if(type)
+    {
+        sprintf(color, "%s", "red");
+    }
+    else
+    {
+        sprintf(color, "%s", "green");
+    }
+    sprintf(draw_desc, "drawbox=x=%d:y=%d:w=%d:h=%d:color=%s@1",
+            x, y, w, h, color);
 
     do{
         filter_graph = avfilter_graph_alloc();
@@ -926,6 +946,8 @@ int FiltersDraw(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, in
         }
     }while(0);
 
+    avfilter_free(buffersink_ctx);
+    avfilter_free(buffersrc_ctx);
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
     avfilter_graph_free(&filter_graph);
@@ -970,6 +992,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
         else if (ret < 0) {
             fprintf(stderr, "Error during decoding\n");
             fflush(stderr);
+            avcodec_flush_buffers(pDecodecCtx);
             return;
         }
 
@@ -987,17 +1010,19 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
         //            printf("other frame \n");
         //            break;
         //        }
-
+#if 0
         AVFrame *pFrameSent;
 
         if(Coordinates.size() > 0)
         {
-            int32_t x = Coordinates[0].left_top_x;
-            int32_t y = Coordinates[0].left_top_y;
-            int32_t w = abs(x - Coordinates[0].right_bottom_x);
-            int32_t h = abs(y - Coordinates[0].right_bottom_y);
-            FiltersDraw(dec_ctx, frame, filt_frame, x, y, w, h);
-            Coordinates.erase(Coordinates.begin());
+            for(int i = 0;i < Coordinates.size();i++)
+            {
+                int32_t x = Coordinates[i].left_top_x;
+                int32_t y = Coordinates[i].left_top_y;
+                int32_t w = abs(x - Coordinates[i].right_bottom_x);
+                int32_t h = abs(y - Coordinates[i].right_bottom_y);
+                FiltersDraw(dec_ctx, frame, filt_frame, x, y, w, h, Coordinates[i].type);
+            }
             pFrameSent = filt_frame;
         }
         else
@@ -1005,6 +1030,9 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
             pFrameSent = frame;
         }
         SendFrameToYuvProc(pFrameSent);
+#else
+     SendFrameToYuvProc(frame);
+#endif
     }
 }
 
@@ -1072,6 +1100,7 @@ int32_t FrameDecodeInit(void)
         fflush(stderr);
         return -1;
     }
+    pDecodecCtx->err_recognition |= AV_EF_EXPLODE;
 
     pDecFrame = av_frame_alloc();
     pFiltFrame = av_frame_alloc();
@@ -1125,7 +1154,6 @@ int FrameDecode(void)
     uint8_t *pDecBuf = H264ReadBuf;
     uint32_t decode_size;
     int ret;
-    struct timeval start_time, end_time;
 
     do{
         decode_size = GetRdDataSize(H264DataIdx);
@@ -1143,7 +1171,6 @@ int FrameDecode(void)
             break;
         }
 
-        gettimeofday(&start_time, nullptr);
         FrameDecodeStart();
 
         /* use the parser to split the data into frames */
@@ -1174,8 +1201,6 @@ int FrameDecode(void)
             ret = 0;
         }
     }while(0);
-    gettimeofday(&end_time, nullptr);
-    printf("decode time = %ld\n", end_time.tv_sec*1000+end_time.tv_usec/1000-start_time.tv_sec*1000-start_time.tv_usec/1000);
 
     FrameDecodeStop();
     av_frame_unref(pDecFrame);
@@ -1234,9 +1259,8 @@ int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long l
         {
             SetNextWrBuf(H264DataIdx);
 
-            pDecodecCtx->gop_size = gop_cnt;
+//            pDecodecCtx->gop_size = gop_cnt;
             gop_cnt = 0;
-
         }
         else
         {
@@ -1262,6 +1286,51 @@ int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long l
             gop_cnt++;
             if(CheckWrSubDataSeg(H264DataIdx, size) < 0) break;
             InsertData(H264DataIdx, lpBuf, static_cast<uint32_t>(size));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+#elif 1
+    static uint32_t frame_cache_cnt = 0;
+
+    switch (type)
+    {
+    case em_FrameType_Header_Frame:
+        break;
+    case em_FrameType_Video_IFrame:
+        GetVideoParam(lpBuf, size);
+
+        memcpy(IFrameCache, lpBuf, size);
+        IFrameSize = size;
+        if(is_first_iframe_recv)
+        {
+            SetNextWrBuf(H264DataIdx);
+            if(CheckWrDataSeg(H264DataIdx, IFrameSize) < 0) break;
+            InsertData(H264DataIdx, IFrameCache, IFrameSize);
+            frame_cache_cnt = 0;
+        }
+        else
+        {
+            if(CheckWrDataSeg(H264DataIdx, IFrameSize) < 0) break;
+            InsertData(H264DataIdx, IFrameCache, IFrameSize);
+            is_first_iframe_recv = true;
+        }
+        break;
+    case em_FrameType_Video_VFrame:
+    {
+        if(!is_first_iframe_recv) break;
+
+        if(CheckWrSubDataSeg(H264DataIdx, size) < 0) break;
+        InsertData(H264DataIdx, lpBuf, static_cast<uint32_t>(size));
+
+        if(++frame_cache_cnt >= DECODE_CACHE_FRAME_NUM)
+        {
+            SetNextWrBuf(H264DataIdx);
+            if(CheckWrDataSeg(H264DataIdx, IFrameSize) < 0) break;
+            InsertData(H264DataIdx, IFrameCache, IFrameSize);
+            frame_cache_cnt = 0;
         }
         break;
     }
@@ -1313,10 +1382,14 @@ void EventAlarmInfoHdl(const char *strEvent)
     StruDefCoordinate coordinates[COORDINATES_MAX_NUM];
     uint32_t coordinates_nums = 0;
     if(ParseCoordinates(strEvent, coordinates, &coordinates_nums) < 0) return;
+    if(coordinates_nums > 0)
+    {
+        pVideoPlayer->coordinates.clear();
+    }
     for(uint32_t i = 0;i < coordinates_nums;i ++)
     {
-        Coordinates.push_back(coordinates[i]);
-        if(Coordinates.size() > COORDINATES_MAX_NUM) Coordinates.erase(Coordinates.begin());
+        pVideoPlayer->coordinates.push_back(coordinates[i]);
+        if(pVideoPlayer->coordinates.size() > COORDINATES_MAX_NUM) pVideoPlayer->coordinates.erase(pVideoPlayer->coordinates.begin());
         printf("coordinate[%d] : (%d, %d) (%d, %d) \n", i, coordinates[i].left_top_x, coordinates[i].left_top_y,
                coordinates[i].right_bottom_x, coordinates[i].right_bottom_y);
     }
@@ -1499,6 +1572,8 @@ void *decode_proc(void *arg)
         }
         usleep(30000);
     }
+
+
 }
 
 void *yuv_proc(void *arg)
@@ -1514,6 +1589,71 @@ void *yuv_proc(void *arg)
 #endif
         usleep(10000);
     }
+}
+
+void *coordinates_proc(void *arg)
+{
+    int client_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if(client_sockfd < 0)
+    {
+        perror("client socket err");
+        return nullptr;
+    }
+
+    struct sockaddr_in server_addr, client_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr("10.0.48.66");
+    server_addr.sin_port = htons(8091);
+
+//    client_addr.sin_family = AF_INET;
+//    client_addr.sin_addr.s_addr = inet_addr("10.0.48.67");
+//    client_addr.sin_port = htons(8091);
+    socklen_t addr_len = sizeof(client_addr);
+
+    uint8_t recv_buf[512 + 1];
+
+    if(bind(client_sockfd, (const struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
+        perror("bind err");
+        fflush(stderr);
+        close(client_sockfd);
+        return nullptr;
+    }
+
+    while(true)
+    {
+        ssize_t recv_len = recvfrom(client_sockfd, recv_buf, 512, 0, (struct sockaddr *)&client_addr, &addr_len);
+        if(recv_len > 0)
+        {
+            recv_buf[recv_len] = '\0';
+            printf("%s\n", recv_buf);
+            fflush(stdout);
+
+            StruDefCoordinate coordinates[COORDINATES_MAX_NUM];
+            uint32_t nums;
+
+            if(ParseCoordinateFromUdp((const char *)recv_buf, coordinates, &nums) < 0)
+            {
+                continue;
+            }
+            pVideoPlayer->coordinates.clear();
+            for(uint32_t i = 0;i < nums;i ++)
+            {
+                pVideoPlayer->coordinates.push_back(coordinates[i]);
+            }
+        }
+        else if(recv_len == 0)
+        {
+            printf("recvfrom len = 0\n");
+            fflush(stdout);
+        }
+        else
+        {
+            perror("recvfrom err");
+        }
+    }
+    close(client_sockfd);
+    return nullptr;
 }
 
 void *rtmp_send_proc(void *arg)
@@ -1601,10 +1741,12 @@ int main(int argc, char *argv[])
     //    pthread_t rtsp_pth;
     pthread_t decode_pth;
     pthread_t yuv_pth;
+    pthread_t coordinates_pth;
 
     //    pthread_create(&rtsp_pth, nullptr, rtsp_proc, nullptr);
     pthread_create(&decode_pth, nullptr, decode_proc, nullptr);
     pthread_create(&yuv_pth, nullptr, yuv_proc, nullptr);
+    pthread_create(&coordinates_pth, nullptr, coordinates_proc, nullptr);
 #ifndef LOCAL_PLAY_DEF
     pthread_t rtmp_send_pth;
 

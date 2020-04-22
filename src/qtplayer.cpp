@@ -3,7 +3,7 @@
 #include <QDebug>
 #include <QString>
 
-QtPlayer::QtPlayer():PlayerTimer(this), PlayCounter(0)
+QtPlayer::QtPlayer():PlayerTimer(this)
 {
     QRect rect = geometry();
     rect.setWidth(640);
@@ -12,7 +12,7 @@ QtPlayer::QtPlayer():PlayerTimer(this), PlayCounter(0)
     rect = geometry();
 
     connect(&PlayerTimer, SIGNAL(timeout()), this, SLOT(PlayerProc()));
-    PlayerTimer.start(10);
+    PlayerTimer.start(40);
 }
 
 void QtPlayer::paintEvent(QPaintEvent *e)
@@ -30,6 +30,30 @@ void QtPlayer::paintEvent(QPaintEvent *e)
     QPainter painter;
     painter.begin(this);
     painter.drawImage(QPoint(0,0), DispImg);
+
+    QPen draw_pen;
+    draw_pen.setWidth(3);
+    for(uint32_t i = 0;i < coordinates.size();i ++)
+    {
+        int32_t x = coordinates[i].left_top_x;
+        int32_t y = coordinates[i].left_top_y;
+        int32_t w = abs(x - coordinates[i].right_bottom_x);
+        int32_t h = abs(y - coordinates[i].right_bottom_y);
+        x = x * 640 / 1920;
+        y = y * 480 / 1080;
+        w = w * 640 / 1920;
+        h = h * 480 / 1080;
+        if(!coordinates[i].type)
+        {
+            draw_pen.setColor(QColor(Qt::green));
+        }
+        else
+        {
+            draw_pen.setColor(QColor(Qt::red));
+        }
+        painter.setPen(draw_pen);
+        painter.drawRect(x, y, w, h);
+    }
     painter.end();
 }
 

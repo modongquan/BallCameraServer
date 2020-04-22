@@ -3,6 +3,9 @@
 
 #include <QOpenGLWidget>
 #include <QTimer>
+#include <vector>
+
+#include "EventParser.h"
 
 typedef int32_t (*FuncCB)(uint8_t *, uint32_t);
 
@@ -13,6 +16,7 @@ public:
     QtPlayer();
 
     FuncCB GetRgb;
+     std::vector<StruDefCoordinate> coordinates;
 
 private slots:
     void PlayerProc();
@@ -22,8 +26,6 @@ private:
 //    void paintGL() override;
 
     QTimer PlayerTimer;
-    uint32_t PlayCounter;
-    uint8_t RgbData[1920*1080*4 + 54];
 };
 
 #endif // QTPLAYER_H

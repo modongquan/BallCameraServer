@@ -20,6 +20,7 @@ SOURCES += \
     ../src/EventParser.cpp \
     ../src/H264QueueBuf.cpp \
     ../src/QueueBuf.cpp \
+    ../src/cJSON.c \
     ../src/main.cpp \
     ../src/qtplayer.cpp \
     ../src/rtmpsrv.cpp \
@@ -32,6 +33,7 @@ HEADERS += \
     ../inc/cms_errcode.h \
     ../inc/SDS_Device_Api.h \
     ../inc/SDS_Device_DataDefine.h \
+    ../src/cJSON.h \
     ../src/qtplayer.h \
     ../src/rtmpsrv.h \
     ../src/thread.h

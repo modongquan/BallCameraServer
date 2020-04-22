@@ -3,6 +3,7 @@
 #include <cstdlib>
 
 #include "EventParser.h"
+#include "cJSON.h"
 
 #define EVENT_INFO_MAX_SIZE 64
 #define COORDINATES_STR_MAX_SIZE    512
@@ -180,5 +181,85 @@ int32_t ParseCoordinates(const char *strEvent, StruDefCoordinate *pCoordinates, 
     if(!idx) return -1;
     *pNums = idx;
 
+    return 0;
+}
+
+int32_t ParseCoordinateFromUdp(const char *pData, StruDefCoordinate *pCoordinates, uint32_t *pNums)
+{
+    if(!pData || !pCoordinates || !pNums) return -1;
+
+    cJSON *pParseArray = cJSON_Parse(pData);
+    if(!pParseArray)
+    {
+        printf("parse cjson fail\n");
+        fflush(stdout);
+        return -1;
+    }
+
+    int size = cJSON_GetArraySize(pParseArray);
+    for(int i = 0; i < size;i ++)
+    {
+        cJSON *pParseObj = cJSON_GetArrayItem(pParseArray, i);
+        if(!pParseObj)
+        {
+            return -1;
+        }
+
+        cJSON *pParseType = cJSON_GetObjectItem(pParseObj, "type");
+        if(!pParseType)
+        {
+            printf("do not find type\n");
+            fflush(stdout);
+            return -1;
+        }
+
+        cJSON *pParseRegion = cJSON_GetObjectItem(pParseObj, "region");
+        if(!pParseRegion)
+        {
+            printf("do not find coodinate\n");
+            fflush(stdout);
+            return -1;
+        }
+        cJSON *pParseC1 = cJSON_GetObjectItem(pParseRegion, "c1");
+        if(!pParseC1)
+        {
+            printf("do not find c1\n");
+            fflush(stdout);
+            return -1;
+        }
+        cJSON *pParseR1 = cJSON_GetObjectItem(pParseRegion, "r1");
+        if(!pParseR1)
+        {
+            printf("do not find r1\n");
+            fflush(stdout);
+            return -1;
+        }
+        cJSON *pParseC2 = cJSON_GetObjectItem(pParseRegion, "c2");
+        if(!pParseC2)
+        {
+            printf("do not find c2\n");
+            fflush(stdout);
+            return -1;
+        }
+        cJSON *pParseR2 = cJSON_GetObjectItem(pParseRegion, "r2");
+        if(!pParseR2)
+        {
+            printf("do not find r2\n");
+            fflush(stdout);
+            return -1;
+        }
+        printf("type = %s, c1 = %d, r1 = %d, c2 = %d, r2 = %d\n", pParseType->valuestring,
+               pParseC1->valueint, pParseR1->valueint, pParseC2->valueint, pParseR2->valueint);
+        fflush(stdout);
+
+        pCoordinates[i].type = atoi(pParseType->valuestring);
+        pCoordinates[i].left_top_x = pParseC1->valueint;
+        pCoordinates[i].left_top_y = pParseR1->valueint;
+        pCoordinates[i].right_bottom_x = pParseC2->valueint;
+        pCoordinates[i].right_bottom_y = pParseR2->valueint;
+    }
+    *pNums = size;
+
+    cJSON_Delete(pParseArray);
     return 0;
 }
