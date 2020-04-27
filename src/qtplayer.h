@@ -26,6 +26,8 @@ private:
 //    void paintGL() override;
 
     QTimer PlayerTimer;
+    uint32_t width;
+    uint32_t height;
 };
 
 #endif // QTPLAYER_H

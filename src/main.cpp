@@ -786,7 +786,7 @@ void YuvToRgb(void)
 
     if(av_image_alloc(pRgbFrame->data, pRgbFrame->linesize, dst_width, dst_height, rgb_fmt, 32) < 0) return;
     if(av_image_alloc(pYuvFrame->data, pYuvFrame->linesize, src_width,
-                   src_height, yuv_fmt, 16) < 0) return;
+                      src_height, yuv_fmt, 16) < 0) return;
 
     pSwsCtx = sws_getCachedContext(nullptr, src_width, src_height, yuv_fmt,
                                    dst_width, dst_height, rgb_fmt, SWS_BILINEAR,
@@ -799,21 +799,21 @@ void YuvToRgb(void)
     }
     while(!ReadData(YuvDataIdx, YuvBuf))
     {
-//        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, src_width, src_height, 4);
-//        pRgbFrame->data[0] = RgbBuf;
-//        pRgbFrame->format = rgb_fmt;
-//        pRgbFrame->width = dst_width;
-//        pRgbFrame->height = dst_height;
+        //        av_image_fill_arrays(pRgbFrame->data, pRgbFrame->linesize, RgbBuf, rgb_fmt, src_width, src_height, 4);
+        //        pRgbFrame->data[0] = RgbBuf;
+        //        pRgbFrame->format = rgb_fmt;
+        //        pRgbFrame->width = dst_width;
+        //        pRgbFrame->height = dst_height;
 
         int32_t y_size = src_width * src_height;
         memcpy(pYuvFrame->data[0], YuvBuf, y_size * 3 / 2);
-//        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, src_width, src_height, 4);
-//        pYuvFrame->data[0] = YuvBuf;
-//        pYuvFrame->data[1] = YuvBuf + y_size;
-//        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
-//        pYuvFrame->format = yuv_fmt;
-//        pYuvFrame->width = src_width;
-//        pYuvFrame->height = src_height;
+        //        av_image_fill_arrays(pYuvFrame->data, pYuvFrame->linesize, YuvBuf, yuv_fmt, src_width, src_height, 4);
+        //        pYuvFrame->data[0] = YuvBuf;
+        //        pYuvFrame->data[1] = YuvBuf + y_size;
+        //        pYuvFrame->data[2] = YuvBuf + y_size * 5 / 4;
+        //        pYuvFrame->format = yuv_fmt;
+        //        pYuvFrame->width = src_width;
+        //        pYuvFrame->height = src_height;
         //        SaveImageDataToFile(pYuvFrame, "./test2.jpg");
 
         sws_scale(pSwsCtx, pYuvFrame->data, pYuvFrame->linesize, 0, src_height, pRgbFrame->data, pRgbFrame->linesize);
@@ -1031,7 +1031,7 @@ void decode(AVCodecContext *dec_ctx, AVFrame *frame, AVFrame *filt_frame, AVPack
         }
         SendFrameToYuvProc(pFrameSent);
 #else
-     SendFrameToYuvProc(frame);
+        SendFrameToYuvProc(frame);
 #endif
     }
 }
@@ -1259,7 +1259,7 @@ int CALLBACK VideoFrameHandle(_handle stream, BYTE* lpBuf, int size, long long l
         {
             SetNextWrBuf(H264DataIdx);
 
-//            pDecodecCtx->gop_size = gop_cnt;
+            //            pDecodecCtx->gop_size = gop_cnt;
             gop_cnt = 0;
         }
         else
@@ -1412,7 +1412,9 @@ void *rtsp_proc(void *arg)
     AVPacket av_pkt;
     int video_idx = -1;
     unsigned int usleep_time;
-    const char rtsp_path[] = {"rtsp://admin:teamway123456@10.0.60.31:554/stream0"};
+//    const char rtsp_path[] = {"rtsp://admin:teamway123456@10.0.60.31:554/stream0"};
+    const char rtsp_path[] = {"rtsp://admin:abcd1234@10.0.48.69:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"};
+//    const char rtsp_path[] = {"rtsp://admin:teamway123456@10.0.0.69:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"};
 
     do
     {
@@ -1451,8 +1453,11 @@ void *rtsp_proc(void *arg)
             fflush(stdout);
             break;
         }
-        pDecodecCtx->time_base = pFmtCtx->streams[video_idx]->time_base;
-        pDecodecCtx->framerate = pFmtCtx->streams[video_idx]->r_frame_rate;
+        if(pDecodecCtx)
+        {
+            pDecodecCtx->time_base = pFmtCtx->streams[video_idx]->time_base;
+            pDecodecCtx->framerate = pFmtCtx->streams[video_idx]->r_frame_rate;
+        }
 
         pCodec = avcodec_find_decoder(pFmtCtx->streams[video_idx]->codecpar->codec_id);
         if(!pCodec)
@@ -1527,6 +1532,7 @@ void *rtsp_proc(void *arg)
                 InsertData(RtmpDataIdx, (uint8_t *)&av_pkt.dts, sizeof(av_pkt.dts));
                 InsertData(RtmpDataIdx, av_pkt.data, av_pkt.size);
                 SetNextWrBuf(RtmpDataIdx);
+                av_packet_unref(&av_pkt);
 #endif
                 //                usleep(usleep_time);
             }
@@ -1605,9 +1611,9 @@ void *coordinates_proc(void *arg)
     server_addr.sin_addr.s_addr = inet_addr("10.0.48.66");
     server_addr.sin_port = htons(8091);
 
-//    client_addr.sin_family = AF_INET;
-//    client_addr.sin_addr.s_addr = inet_addr("10.0.48.67");
-//    client_addr.sin_port = htons(8091);
+    //    client_addr.sin_family = AF_INET;
+    //    client_addr.sin_addr.s_addr = inet_addr("10.0.48.67");
+    //    client_addr.sin_port = htons(8091);
     socklen_t addr_len = sizeof(client_addr);
 
     uint8_t recv_buf[512 + 1];
@@ -1684,8 +1690,8 @@ int main(int argc, char *argv[])
     EventHandleInit();
 
 #ifdef LOCAL_PLAY_DEF
-        pVideoPlayer = new QtPlayer;
-        pVideoPlayer->GetRgb = ReadRgb;
+    pVideoPlayer = new QtPlayer;
+    pVideoPlayer->GetRgb = ReadRgb;
 #endif
 
     if(QueueBufInit(256) < 0)
@@ -1738,12 +1744,12 @@ int main(int argc, char *argv[])
     }
 
     pthread_mutex_init(&video_param_mtx, nullptr);
-    //    pthread_t rtsp_pth;
+    pthread_t rtsp_pth;
     pthread_t decode_pth;
     pthread_t yuv_pth;
     pthread_t coordinates_pth;
 
-    //    pthread_create(&rtsp_pth, nullptr, rtsp_proc, nullptr);
+    pthread_create(&rtsp_pth, nullptr, rtsp_proc, nullptr);
     pthread_create(&decode_pth, nullptr, decode_proc, nullptr);
     pthread_create(&yuv_pth, nullptr, yuv_proc, nullptr);
     pthread_create(&coordinates_pth, nullptr, coordinates_proc, nullptr);
